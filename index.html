@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="時間外">
+<meta name="theme-color" content="#1d3557">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>時間外チェック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap">
+<style>
+/* 駅の案内板と信号機を下敷きにした、1列で縦に読む画面。状態は信号の3灯（進行・注意・停止）で示す */
+:root{
+  --bg:#eef1f4;          /* ホームの床のような明るいグレー */
+  --surface:#ffffff;
+  --ink:#16202c;         /* 駅名標の濃紺寄りの墨 */
+  --muted:#5a6675;
+  --line:#d3d9e0;
+  --navy:#1d3557;        /* 案内サインの紺 */
+  --navy-ink:#ffffff;
+  --pink:#d6457a;        /* 路線カラーの差し色 */
+  --go:#16824a;          /* 進行 */
+  --go-bg:#e3f3ea;
+  --caution:#b77900;     /* 注意 */
+  --caution-bg:#fff3d6;
+  --stop:#c22b25;        /* 停止 */
+  --stop-bg:#fde6e4;
+  --lamp-off:#2b333d;
+  --housing:#1a1f26;
+  --track:#e3e7ec;
+  --font:"BIZ UDPGothic","Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161c;--surface:#1a2129;--ink:#eef2f6;--muted:#9aa6b4;--line:#2c3642;--navy:#2f5287;--navy-ink:#ffffff;
+  --pink:#ec6f9c;--go:#3fbf78;--go-bg:#15301f;--caution:#f0b02e;--caution-bg:#352a10;--stop:#ff6a62;--stop-bg:#3a1715;
+  --lamp-off:#2a3038;--housing:#0b0e12;--track:#26303b;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161c;--surface:#1a2129;--ink:#eef2f6;--muted:#9aa6b4;--line:#2c3642;--navy:#2f5287;--navy-ink:#ffffff;
+  --pink:#ec6f9c;--go:#3fbf78;--go-bg:#15301f;--caution:#f0b02e;--caution-bg:#352a10;--stop:#ff6a62;--stop-bg:#3a1715;
+  --lamp-off:#2a3038;--housing:#0b0e12;--track:#26303b;color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:17px;line-height:1.6}
+.wrap{max-width:720px;margin:0 auto;padding-inline:16px;padding-block:0 48px}
+.wide .wrap{max-width:1100px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--pink);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+/* 上の帯：駅名標風 */
+.topbar{background:var(--navy);color:var(--navy-ink);border-bottom:5px solid var(--pink)}
+.topbar .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:12px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:20px;letter-spacing:.06em}
+.brand small{display:block;font-weight:400;font-size:12px;letter-spacing:.12em;opacity:.8}
+.who{font-weight:700;font-size:20px;text-align:right}
+.who small{display:block;font-weight:400;font-size:13px;opacity:.85}
+
+.demo-bar{background:var(--caution-bg);color:var(--ink);border-bottom:1px solid var(--line)}
+.demo-bar .wrap{padding-block:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:6px 12px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--navy);color:var(--navy-ink)}
+
+.period{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin:18px 0 10px;color:var(--muted);font-size:15px}
+.period b{color:var(--ink);font-size:18px}
+
+/* 信号カード */
+.signal{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px}
+.signal.go{background:var(--go-bg);border-color:transparent}
+.signal.caution{background:var(--caution-bg);border-color:transparent}
+.signal.stop{background:var(--stop-bg);border-color:transparent}
+.lamps{background:var(--housing);border-radius:30px;padding:8px;display:flex;flex-direction:column;gap:8px}
+.lamp{width:34px;height:34px;border-radius:50%;background:var(--lamp-off)}
+.lamp.on.r{background:#ff4b3e;box-shadow:0 0 14px #ff4b3e}
+.lamp.on.y{background:#ffbf1f;box-shadow:0 0 14px #ffbf1f}
+.lamp.on.g{background:#22d36f;box-shadow:0 0 14px #22d36f}
+.signal h2{margin:0;font-size:24px;line-height:1.35;text-wrap:balance}
+.signal.go h2{color:var(--go)} .signal.caution h2{color:var(--caution)} .signal.stop h2{color:var(--stop)}
+.signal p{margin:4px 0 0;font-size:17px}
+
+/* 大きな数字 */
+.big{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px;display:grid;gap:18px}
+.figure-label{font-size:15px;color:var(--muted)}
+.figure{font-size:44px;font-weight:700;line-height:1.1;letter-spacing:.01em}
+.figure .u{font-size:22px;font-weight:700;margin:0 2px}
+.figure-sub{font-size:15px;color:var(--muted)}
+.meter{display:grid;gap:6px}
+.meter-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.meter-head b{font-size:17px}
+.meter-head span{font-size:15px;color:var(--muted)}
+.bar{position:relative;height:26px;background:var(--track);border-radius:6px;overflow:hidden}
+.fill{position:absolute;left:0;top:0;bottom:0;background:var(--go)}
+.fill.caution{background:var(--caution)} .fill.stop{background:var(--stop)}
+.fill-self{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--pink) 0 6px,transparent 6px 10px);opacity:.85}
+.limit{position:absolute;top:-2px;bottom:-2px;width:3px;background:var(--ink)}
+.ticks{position:relative;height:18px;font-size:13px;color:var(--muted)}
+.ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.ticks span.l{transform:none}
+
+/* 回数 */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px}
+.card h3{margin:0 0 10px;font-size:18px}
+.count-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.box{width:40px;height:40px;border-radius:6px;border:2px solid var(--line);display:grid;place-items:center;font-weight:700;font-size:16px;color:var(--muted)}
+.box.used{background:var(--caution);border-color:var(--caution);color:#1a1300}
+.box.used.cur{outline:3px solid var(--ink);outline-offset:1px}
+.box.over{background:var(--stop);border-color:var(--stop);color:#fff}
+.box.ban{border-style:dashed;border-color:var(--stop);color:var(--stop);font-size:12px;width:auto;padding:0 8px}
+.count-text{font-size:20px;font-weight:700;margin-top:10px}
+.note{font-size:14px;color:var(--muted);margin:8px 0 0}
+
+/* 月の一覧 */
+.months{display:grid;gap:8px}
+.mrow{display:grid;grid-template-columns:5.2em 1fr 6.5em;gap:10px;align-items:center;font-size:15px}
+.mrow .mbar{position:relative;height:14px;background:var(--track);border-radius:4px;overflow:hidden}
+.mrow .mbar i{position:absolute;left:0;top:0;bottom:0;background:var(--go)}
+.mrow .mbar i.stop{background:var(--stop)} .mrow .mbar i.caution{background:var(--caution)}
+.mrow .mbar em{position:absolute;top:0;bottom:0;width:2px;background:var(--ink)}
+.mrow .v{text-align:right}
+.mrow.none{color:var(--muted)}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:1px 6px;border-radius:4px;background:var(--stop);color:#fff;margin-left:4px}
+
+/* 日ごと */
+details.card summary{font-weight:700;font-size:18px;cursor:pointer}
+.tbl-wrap{overflow-x:auto;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font-size:13px;color:var(--muted);font-weight:700}
+td.r,th.r{text-align:right}
+tr.future td{color:var(--muted)}
+tr.today td{background:var(--caution-bg)}
+.sun{color:var(--stop)} .sat{color:var(--navy)}
+:root[data-theme="dark"] .sat{color:#8fb3ff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .sat{color:#8fb3ff}}
+
+/* 自分の記録 */
+.self-list{display:grid;gap:6px;margin:6px 0 12px}
+.self-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:16px}
+.self-item.old{color:var(--muted)}
+.self-item button{border:1px solid var(--line);background:transparent;border-radius:6px;padding:4px 10px;font-size:14px}
+.form{display:grid;gap:12px}
+.form label{font-size:15px;color:var(--muted);display:block;margin-bottom:4px}
+.form .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.form input[type=date],.form select,.form input[type=text],.form input[type=password]{font-size:18px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:20px;padding:6px 14px;font-size:15px}
+.chip[aria-pressed="true"]{background:var(--navy);color:var(--navy-ink);border-color:var(--navy)}
+.btn{border:0;border-radius:10px;padding:14px 20px;font-size:18px;font-weight:700;background:var(--navy);color:var(--navy-ink)}
+.btn.sub{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:400;font-size:16px;padding:10px 16px}
+.btn.pink{background:var(--pink);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+.foot{margin-top:28px;font-size:14px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.foot a{color:var(--muted)}
+.msg{padding:12px 14px;border-radius:10px;margin-top:12px;font-size:15px}
+.msg.ok{background:var(--go-bg)} .msg.warn{background:var(--caution-bg)} .msg.err{background:var(--stop-bg)}
+
+/* ログイン */
+.login{max-width:460px;margin:40px auto 0;display:grid;gap:16px}
+.login h1{font-size:24px;margin:0}
+.code-input{font-size:26px!important;letter-spacing:.12em;text-transform:uppercase;width:100%}
+
+/* 助役画面 */
+.drop{border:2px dashed var(--line);border-radius:14px;padding:22px;text-align:center;background:var(--surface)}
+.drop.hover{border-color:var(--pink)}
+.sumchips{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.sumchip{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:9em}
+.sumchip b{display:block;font-size:26px}
+.sumchip.stop b{color:var(--stop)} .sumchip.caution b{color:var(--caution)} .sumchip.go b{color:var(--go)}
+.adm-table tr{cursor:pointer}
+.adm-table tr:hover td{background:var(--track)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:2px 10px;border-radius:20px}
+.pill::before{content:"";width:10px;height:10px;border-radius:50%;background:currentColor}
+.pill.go{color:var(--go);background:var(--go-bg)} .pill.caution{color:var(--caution);background:var(--caution-bg)} .pill.stop{color:var(--stop);background:var(--stop-bg)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px}
+.panel h3{margin:0 0 10px;font-size:18px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.grid2 input{width:100%}
+.detail-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+
+/* QRカード（印刷用） */
+#printArea{display:none}
+@media print{
+  body{background:#fff;color:#000}
+  body>*:not(#printArea){display:none!important}
+  #printArea{display:grid!important;grid-template-columns:1fr 1fr;gap:8mm}
+  .qcard{border:1px solid #000;border-radius:3mm;padding:5mm;break-inside:avoid;display:grid;grid-template-columns:auto 1fr;gap:4mm;align-items:center;font-size:10.5pt;color:#000}
+  .qcard h4{margin:0 0 2mm;font-size:14pt}
+  .qcard .code{font-size:13pt;font-weight:700;letter-spacing:.08em}
+  .qcard .qr img,.qcard .qr canvas{width:32mm!important;height:32mm!important}
+  .qcard p{margin:1mm 0}
+}
+@media (prefers-reduced-motion: no-preference){.fill{transition:width .5s ease}}
+</style>
+
+</head><body>
+<div id="app"></div>
+<div id="printArea"></div>
+
+<script>
+"use strict";
+/* ================= 計算のきまり（グリーン表と同じ） ================= */
+const LIMIT45 = 45*60, LIMIT80 = 80*60, WARN45 = 40*60, WARN80 = 70*60, LAST_CHANCE = 35*60, MAX_TIMES = 6;
+const DEFAULT_SETTINGS = { yearStart: "2026-09-16", yearEnd: "2027-09-15" };
+
+function pad(n){return String(n).padStart(2,"0");}
+function ymd(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());}
+function parseYmd(s){const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d);}
+function todayStr(){return ymd(new Date());}
+/* 勤務月：前月16日〜当月15日。キーは締め月 "YYYY-MM" */
+function periodKey(s){const d=parseYmd(s);let y=d.getFullYear(),m=d.getMonth()+1;if(d.getDate()>=16){m++;if(m>12){m=1;y++;}}return y+"-"+pad(m);}
+function periodRange(key){const [y,m]=key.split("-").map(Number);const end=new Date(y,m-1,15);const start=new Date(y,m-2,16);return {from:ymd(start),to:ymd(end)};}
+function periodLabel(key){const [y,m]=key.split("-").map(Number);return y+"年"+m+"月度";}
+function shortMD(s){const d=parseYmd(s);return (d.getMonth()+1)+"/"+d.getDate();}
+function yearKeys(st){const keys=[];let k=periodKey(st.yearStart);for(let i=0;i<24;i++){const r=periodRange(k);if(r.to>st.yearEnd)break;keys.push(k);const [y,m]=k.split("-").map(Number);k=(m===12?(y+1)+"-01":y+"-"+pad(m+1));}return keys;}
+
+function hm(min){min=Math.round(min||0);const neg=min<0;min=Math.abs(min);const h=Math.floor(min/60),m=min%60;let s;if(h===0)s=m+"分";else if(m===0)s=h+"時間";else s=h+"時間"+m+"分";return (neg?"−":"")+s;}
+function hmShort(min){min=Math.round(min||0);const h=Math.floor(Math.abs(min)/60),m=Math.abs(min)%60;return (min<0?"-":"")+h+":"+pad(m);}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+const WD="日月火水木金土";
+
+/* --- グリーン表1行分の時間外（勤務表の60H計算列と同じ式） ---
+   AV: 日勤なら所定/法定差 27分   AW = 早出居残明出(U) − AV
+   AO: AW>0 のとき AW（点呼分に〇があれば −30分）
+   AP: 公休出勤・法定外(X)       AQ: 深夜計(Y) − 公出深夜(Z,AA)（AW<0なら相殺）
+   AR: 公出深夜・法定外(AA)       AS/AT: 徹夜回数があれば5時間
+   法定休日の労働（W・Z）は時間外に入れず、80時間の判定だけに加える */
+function dayOvertime(c){
+  const av = c.D ? 27 : 0;
+  const aw = c.U - av;
+  const ao = aw<=0 ? 0 : (c.AN ? aw-30 : aw);
+  const aq = aw>=0 ? (c.Y - c.Z - c.AA) : Math.max(0, c.Y - c.Z - c.AA + aw);
+  const tetsu = (c.AB && c.E && !c.F) ? 300 : 0;
+  return { ot: ao + c.X + aq + c.AA + tetsu, hol: c.W + c.Z };
+}
+
+/* --- Excel（SheetJS）からの読み込み --- */
+const CIRCLE=/^[○〇◯]$/;
+function cellVal(ws,a){const c=ws[a];return c?c.v:undefined;}
+function cellMin(ws,a){
+  const c=ws[a]; if(!c||c.v===""||c.v==null) return 0;
+  if(typeof c.v==="number") return Math.round(c.v*1440);
+  if(c.v instanceof Date) return c.v.getHours()*60+c.v.getMinutes();
+  const m=String(c.v).trim().match(/^(\d+)[:：.](\d{1,2})$/); if(m) return (+m[1])*60+(+m[2]);
+  return 0;
+}
+function filled(ws,a){const v=cellVal(ws,a);return v!==undefined&&v!==null&&String(v).trim()!==""&&v!==0;}
+function isCircle(ws,a){const v=cellVal(ws,a);return v!=null&&CIRCLE.test(String(v).trim());}
+function serialToYmd(v){const d=new Date(Math.round((v-25569)*86400000));return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate());}
+const KIND_COLS=[["D","日勤"],["E","隔勤"],["F","公出(法定)"],["G","公出"],["H","公休(法定)"],["I","公休"],["J","年休"],["K","特休"],["L","生休"],["M","その他(有)"],["N","その他(無)"],["O","公傷"],["P","病欠"],["Q","私欠"]];
+function normName(s){return String(s||"").replace(/[\s　]/g,"");}
+
+function parseWorkbook(wb, fileName){
+  const out={people:[],warnings:[],monthKeys:new Set()};
+  for(const sn of wb.SheetNames){
+    const ws=wb.Sheets[sn];
+    const a6=cellVal(ws,"A6"); if(typeof a6!=="number") continue;
+    const id=normName(sn); if(!id) continue;
+    const days=[];
+    const rows=[];for(let r=6;r<=21;r++)rows.push(r);for(let r=26;r<=40;r++)rows.push(r);
+    for(const r of rows){
+      const a=cellVal(ws,"A"+r); if(typeof a!=="number") continue;
+      const d=serialToYmd(a);
+      const c={U:cellMin(ws,"U"+r),X:cellMin(ws,"X"+r),W:cellMin(ws,"W"+r),Y:cellMin(ws,"Y"+r),Z:cellMin(ws,"Z"+r),AA:cellMin(ws,"AA"+r),
+        D:isCircle(ws,"D"+r),E:filled(ws,"E"+r),F:isCircle(ws,"F"+r),AN:filled(ws,"AN"+r),AB:filled(ws,"AB"+r)};
+      const {ot,hol}=dayOvertime(c);
+      let k="";for(const [col,lab] of KIND_COLS){const v=cellVal(ws,col+r);if(v!=null&&String(v).trim()!==""){k=CIRCLE.test(String(v).trim())?lab:String(v).trim();break;}}
+      if(c.AB) k+=(k?"・":"")+"徹夜";
+      days.push({d,ot,hol,k});
+    }
+    if(!days.length) continue;
+    const key=periodKey(days[0].d);
+    out.monthKeys.add(key);
+    const nm57=normName(cellVal(ws,"D57"));
+    let no=cellVal(ws,"A57"), job=cellVal(ws,"Q57"), prev="";
+    if(nm57 && nm57!==id){ out.warnings.push({prev:nm57,text:`「${sn.trim()}」のシートは、下の氏名欄が「${String(cellVal(ws,"D57")).trim()}」になっています。シート名の「${sn.trim()}」さんとして登録しました`}); prev=nm57; }
+    out.people.push({id,name:sn.trim(),no:no!=null?String(no):"",job:job?String(job).trim():"",prev,key,days});
+  }
+  if(!out.people.length) out.warnings.push({text:`「${fileName}」にグリーン表のシートが見つかりませんでした`});
+  return out;
+}
+
+/* --- 集計 --- */
+function sumMonth(m, today){
+  let ot=0,hol=0,otTo=0,holTo=0;
+  for(const x of m.days){ot+=x.ot;hol+=x.hol;if(x.d<=today){otTo+=x.ot;holTo+=x.hol;}}
+  return {ot,hol,otTo,holTo};
+}
+function summarize(p, today, selfEntries){
+  const st=p.settings||DEFAULT_SETTINGS;
+  const yk=yearKeys(st);
+  const sums={};for(const k of Object.keys(p.months||{}))sums[k]=sumMonth(p.months[k],today);
+  let curKey=periodKey(today);
+  let stale=false;
+  if(!p.months[curKey]){const ks=Object.keys(p.months).sort();if(ks.length){curKey=ks[ks.length-1];stale=true;}}
+  const cur=sums[curKey]||{ot:0,hol:0,otTo:0,holTo:0};
+  const range=periodRange(curKey);
+  const asOf=p.asOf||"0000-00-00";
+  const selfIn=(selfEntries||[]).filter(e=>e.d>=range.from&&e.d<=range.to);
+  const selfExtra=selfIn.filter(e=>e.d>=asOf).reduce((a,e)=>a+e.min,0);
+  const otEff=cur.ot+selfExtra, t80=cur.ot+cur.hol+selfExtra;
+  let countOthers=0, annual=0;
+  for(const k of yk){const s=sums[k];if(!s)continue;annual+=s.ot;if(k!==curKey&&s.ot>LIMIT45)countOthers++;}
+  const curInYear=yk.includes(curKey);
+  const overNow=otEff>LIMIT45;
+  const count=countOthers+(overNow&&curInYear?1:0);
+  if(curInYear) annual+=selfExtra;
+  const remain=LIMIT45-otEff;
+  let level="go",title="大丈夫です",sub="45時間まで あと "+hm(remain);
+  if(overNow&&count>MAX_TIMES){level="stop";title="45時間超えが今年度"+count+"回目です";sub="6回までと決められています。すぐに助役へ相談してください";}
+  else if(t80>=LIMIT80){level="stop";title="月80時間を超えています";sub="休日出勤を含めて "+hm(t80)+"。すぐに助役へ相談してください";}
+  else if(overNow){level="stop";title="45時間を超えました";sub="今年度 "+count+" 回目です（6回まで）";}
+  else if(countOthers>=MAX_TIMES&&otEff>=LAST_CHANCE){level="caution";title="今年度はもう45時間を超えられません";sub="あと "+hm(remain)+" で7回目になってしまいます";}
+  else if(otEff>=WARN45){level="caution";title="45時間に近づいています";sub="あと "+hm(remain)+" で45時間です";}
+  else if(t80>=WARN80){level="caution";title="80時間に近づいています";sub="休日出勤を含めて "+hm(t80)+"（あと "+hm(LIMIT80-t80)+"）";}
+  return {curKey,range,stale,cur,selfExtra,selfIn,otEff,t80,count,countOthers,curInYear,annual,level,title,sub,yk,sums,remain};
+}
+</script>
+
+<script>
+"use strict";
+/* ================= 暗号化（データは番号を知っている人しか読めない） ================= */
+const enc=new TextEncoder(), dec=new TextDecoder();
+const ALPH="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function newCode(){const b=crypto.getRandomValues(new Uint8Array(12));return Array.from(b,x=>ALPH[x&31]).join("");}
+function normCode(s){return String(s||"").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]/g,"");}
+function fmtCode(c){return c.replace(/(.{4})(?=.)/g,"$1-");}
+function b64(u8){let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s);}
+function unb64(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+async function pbkdf2(secret,salt,iter){const base=await crypto.subtle.importKey("raw",enc.encode(secret),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);}
+const CODE_SALT=enc.encode("zangyo-check-v1");
+const keyCache=new Map();
+async function codeKey(code){if(!keyCache.has(code))keyCache.set(code,pbkdf2(code,CODE_SALT,100000));return keyCache.get(code);}
+async function codeTag(code){const h=new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode("tag|"+code)));return Array.from(h.slice(0,10),x=>x.toString(16).padStart(2,"0")).join("");}
+async function seal(key,obj){const iv=crypto.getRandomValues(new Uint8Array(12));const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(JSON.stringify(obj))));return {iv:b64(iv),ct:b64(ct)};}
+async function unseal(key,box){const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64(box.iv)},key,unb64(box.ct));return JSON.parse(dec.decode(pt));}
+
+/* ================= 保存（その端末だけ） ================= */
+function lsGet(k,def){try{const v=localStorage.getItem(k);return v==null?def:JSON.parse(v);}catch(e){return def;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function lsDel(k){try{localStorage.removeItem(k);}catch(e){}}
+
+/* ================= 画面の部品 ================= */
+const $app=document.getElementById("app");
+const DEMO=!!window.ZANGYO_DEMO;
+let DATA=null;           // data.json
+let VIEW={mode:"person"};// person | admin
+
+function lampsHtml(level){return `<div class="lamps" aria-hidden="true"><div class="lamp r ${level==="stop"?"on":""}"></div><div class="lamp y ${level==="caution"?"on":""}"></div><div class="lamp g ${level==="go"?"on":""}"></div></div>`;}
+
+function meterHtml(o){
+  const max=o.limit*1.3;
+  const pct=v=>Math.max(0,Math.min(100,v/max*100));
+  const lvl=o.value>o.limit?"stop":(o.value>=o.warn?"caution":"");
+  const base=o.value-(o.self||0);
+  const t=[0,Math.round(o.limit/60/3/5)*5*60,Math.round(o.limit/60*2/3/5)*5*60];
+  return `<div class="meter">
+    <div class="meter-head"><b>${esc(o.label)}</b><span class="num">${hm(o.value)} ／ 上限 ${o.limit/60}時間</span></div>
+    <div class="bar" role="img" aria-label="${esc(o.label)} ${hm(o.value)}、上限${o.limit/60}時間">
+      <div class="fill ${lvl}" style="width:${pct(base)}%"></div>
+      ${o.self?`<div class="fill-self" style="left:${pct(base)}%;width:${pct(o.value)-pct(base)}%"></div>`:""}
+      <div class="limit" style="left:calc(${pct(o.limit)}% - 1px)"></div>
+    </div>
+    <div class="ticks num"><span class="l" style="left:0">0</span><span style="left:${pct(t[1])}%">${t[1]/60}</span><span style="left:${pct(t[2])}%">${t[2]/60}</span><span style="left:${pct(o.limit)}%"><b>${o.limit/60}時間</b></span></div>
+  </div>`;
+}
+
+function countHtml(s){
+  const boxes=[];
+  const curOver=s.otEff>LIMIT45&&s.curInYear;
+  for(let i=1;i<=MAX_TIMES;i++){
+    const used=i<=s.count;
+    const isCur=curOver&&i===s.count;
+    boxes.push(`<div class="box ${used?"used":""} ${isCur?"cur":""}">${i}</div>`);
+  }
+  for(let i=MAX_TIMES+1;i<=s.count;i++) boxes.push(`<div class="box over">${i}</div>`);
+  if(s.count<=MAX_TIMES) boxes.push(`<div class="box ban">7回目は禁止</div>`);
+  const left=MAX_TIMES-s.count;
+  const txt=s.count>MAX_TIMES?`<span style="color:var(--stop)">${s.count}回（6回を超えています）</span>`:`${s.count}回 <span style="font-weight:400;font-size:16px">／ 6回まで（残り ${Math.max(0,left)} 回）</span>`;
+  return `<section class="card"><h3>今年度、45時間を超えた回数</h3>
+    <div class="count-row">${boxes.join("")}</div>
+    <div class="count-text">${txt}</div>
+    <p class="note">数える期間：${esc(fmtJ((DATA_SETTINGS().yearStart)))}〜${esc(fmtJ(DATA_SETTINGS().yearEnd))}。${curOver?"枠に線のある回は今月の分です。":""}</p></section>`;
+}
+function fmtJ(s){const d=parseYmd(s);return d.getFullYear()+"年"+(d.getMonth()+1)+"月"+d.getDate()+"日";}
+let CURRENT_SETTINGS=DEFAULT_SETTINGS;
+function DATA_SETTINGS(){return CURRENT_SETTINGS;}
+
+function monthsHtml(p,s){
+  const rows=s.yk.map(k=>{
+    const m=s.sums[k];
+    const lab=k.split("-").map(Number)[1]+"月度";
+    if(!m) return `<div class="mrow none"><span>${lab}</span><div class="mbar"><em style="left:${45/60*100}%"></em></div><span class="v">—</span></div>`;
+    const v=k===s.curKey?s.otEff:m.ot;
+    const w=Math.min(100,v/(60*60)*100);
+    const cls=v>LIMIT45?"stop":(v>=WARN45?"caution":"");
+    return `<div class="mrow"><span>${k===s.curKey?"<b>"+lab+"</b>":lab}</span><div class="mbar"><i class="${cls}" style="width:${w}%"></i><em style="left:${45/60*100}%"></em></div><span class="v num">${hmShort(v)}${v>LIMIT45?'<span class="tag">超</span>':""}</span></div>`;
+  });
+  return `<section class="card"><h3>月ごとの時間外（今年度）</h3><div class="months">${rows.join("")}</div>
+  <p class="note">縦の線が45時間です。年間の合計 <b class="num">${hm(s.annual)}</b></p></section>`;
+}
+
+function daysHtml(p,s,today){
+  const m=p.months[s.curKey]; if(!m) return "";
+  const rows=m.days.map(x=>{
+    const d=parseYmd(x.d),w=d.getDay();
+    const cls=x.d===today?"today":(x.d>today?"future":"");
+    return `<tr class="${cls}"><td class="${w===0?"sun":w===6?"sat":""}">${d.getMonth()+1}/${d.getDate()}（${WD[w]}）</td><td>${esc(x.k||"")}${x.d>today?" <small>予定</small>":""}</td><td class="r num">${x.ot?hmShort(x.ot):""}</td><td class="r num">${x.hol?hmShort(x.hol):""}</td></tr>`;
+  }).join("");
+  return `<details class="card"><summary>日ごとの内訳を見る</summary>
+    <div class="tbl-wrap"><table><thead><tr><th>日付</th><th>勤務</th><th class="r">時間外</th><th class="r">法定休日出勤</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="note">グリーン表の数字です。点呼分（30分）・日勤の所定差（27分）を差し引き、徹夜は5時間で数えています。</p></details>`;
+}
+
+/* 自分の記録 */
+let selfDraft={h:1,m:0,memo:"居残り"};
+function selfHtml(s,entries,asOf,editable){
+  if(!editable) return "";
+  const items=s.selfIn.slice().sort((a,b)=>a.d<b.d?1:-1).map(e=>{
+    const old=e.d<asOf;
+    return `<div class="self-item ${old?"old":""}"><span>${shortMD(e.d)}　<b class="num">${hm(e.min)}</b>　${esc(e.memo||"")}${old?"<br><small>グリーン表に反映済みのはずの日です（合計には入れていません）</small>":""}</span><button data-del="${esc(e.id)}">消す</button></div>`;
+  }).join("");
+  const hOpts=Array.from({length:13},(_,i)=>`<option value="${i}" ${i===selfDraft.h?"selected":""}>${i}時間</option>`).join("");
+  const mOpts=[0,10,15,20,30,40,45,50].map(i=>`<option value="${i}" ${i===selfDraft.m?"selected":""}>${i}分</option>`).join("");
+  const memos=["居残り","早出","休憩買上","訓練・研修","公休出勤","その他"];
+  return `<section class="card"><h3>自分で記録する</h3>
+    <p class="note" style="margin-top:0">グリーン表にまだ載っていない時間外をメモできます。記録はこのスマホ（パソコン）の中だけに残り、上のグラフに<span style="color:var(--pink);font-weight:700">しま模様</span>で足されます。</p>
+    ${items?`<div class="self-list">${items}</div>`:""}
+    <form class="form" id="selfForm">
+      <div class="row">
+        <div><label for="sDate">日付</label><input type="date" id="sDate" value="${todayStr()}"></div>
+        <div><label for="sH">時間</label><select id="sH">${hOpts}</select></div>
+        <div><label for="sM">分</label><select id="sM">${mOpts}</select></div>
+      </div>
+      <div><label>内容</label><div class="chips" id="sMemo">${memos.map(x=>`<button type="button" class="chip" aria-pressed="${x===selfDraft.memo}">${x}</button>`).join("")}</div></div>
+      <div class="btn-row"><button class="btn pink" type="submit">記録する</button><span id="selfMsg" class="note" style="margin:0"></span></div>
+    </form></section>`;
+}
+
+function personHtml(p,opts){
+  const today=opts.today||todayStr();
+  const entries=opts.selfKey?lsGet(opts.selfKey,[]):[];
+  CURRENT_SETTINGS=p.settings||DEFAULT_SETTINGS;
+  const s=summarize(p,today,entries);
+  const r=s.range;
+  const staleMsg=s.stale?`<div class="msg warn">今月度（${periodLabel(periodKey(today))}）のグリーン表はまだ届いていません。${periodLabel(s.curKey)}の数字を表示しています。</div>`:"";
+  return `
+  ${staleMsg}
+  <div class="period"><span><b>${periodLabel(s.curKey)}</b>　${shortMD(r.from)}〜${shortMD(r.to)}締め</span><span>グリーン表 ${p.asOf?shortMD(p.asOf):"—"} 時点</span></div>
+  <section class="signal ${s.level}" aria-live="polite">${lampsHtml(s.level)}<div><h2>${esc(s.title)}</h2><p>${esc(s.sub)}</p></div></section>
+  <section class="big">
+    <div>
+      <div class="figure-label">今月の時間外（${shortMD(r.to)}締めまでの予定を含む）</div>
+      <div class="figure num">${bigHm(s.otEff)}</div>
+      <div class="figure-sub num">うち今日までの分 ${hm(s.cur.otTo)}${s.selfExtra?`　／　自分の記録 ＋${hm(s.selfExtra)}`:""}</div>
+    </div>
+    ${meterHtml({label:"時間外（月45時間まで）",value:s.otEff,self:s.selfExtra,limit:LIMIT45,warn:WARN45})}
+    ${meterHtml({label:"時間外＋法定休日出勤（月80時間まで）",value:s.t80,self:s.selfExtra,limit:LIMIT80,warn:WARN80})}
+  </section>
+  ${countHtml(s)}
+  ${selfHtml(s,entries,p.asOf||"",!!opts.selfKey)}
+  ${monthsHtml(p,s)}
+  ${daysHtml(p,s,today)}`;
+}
+function bigHm(min){const h=Math.floor(min/60),m=Math.round(min%60);return `${h}<span class="u">時間</span>${pad(m)}<span class="u">分</span>`;}
+
+function bindSelf(selfKey,rerender){
+  const f=document.getElementById("selfForm"); if(!f) return;
+  document.querySelectorAll("#sMemo .chip").forEach(b=>b.onclick=()=>{selfDraft.memo=b.textContent;document.querySelectorAll("#sMemo .chip").forEach(x=>x.setAttribute("aria-pressed",x===b));});
+  f.onsubmit=e=>{e.preventDefault();
+    const d=document.getElementById("sDate").value, h=+document.getElementById("sH").value, m=+document.getElementById("sM").value;
+    selfDraft.h=h;selfDraft.m=m;
+    if(!d||h*60+m<=0){document.getElementById("selfMsg").textContent="日付と時間を選んでください";return;}
+    const list=lsGet(selfKey,[]);list.push({id:Date.now().toString(36),d,min:h*60+m,memo:selfDraft.memo});lsSet(selfKey,list);rerender();
+  };
+  document.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
+    if(b.dataset.armed){const list=lsGet(selfKey,[]).filter(x=>x.id!==b.dataset.del);lsSet(selfKey,list);rerender();}
+    else{b.dataset.armed="1";b.textContent="本当に消す";}
+  });
+}
+
+function topbar(name,sub){return `<header class="topbar"><div class="wrap"><div class="brand">時間外チェック<small>北習志野管区</small></div>${name?`<div class="who">${esc(name)}<small>${esc(sub||"")}</small></div>`:""}</div></header>`;}
+
+/* ================= 個人の画面 ================= */
+async function showPerson(code){
+  const tag=await codeTag(code);
+  const box=DATA&&DATA.people&&DATA.people[tag];
+  if(!box){lsDel("zangyo-code");return showLogin("このコードは見つかりませんでした。カードのQRコードを読み直すか、コードを確かめてください。");}
+  let p;try{p=await unseal(await codeKey(code),box);}catch(e){return showLogin("このコードでは開けませんでした。");}
+  lsSet("zangyo-code",code);
+  const selfKey="zangyo-self-"+tag;
+  const render=()=>{
+    $app.innerHTML=topbar(p.name,p.job)+`<main class="wrap">${personHtml(p,{selfKey})}
+      <div class="foot"><span>更新：${DATA.updated?new Date(DATA.updated).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span><span><a href="#" id="logout">この端末から外す</a>　<a href="#admin">助役メニュー</a></span></div></main>`;
+    bindSelf(selfKey,render);
+    document.getElementById("logout").onclick=e=>{e.preventDefault();const a=e.target;if(a.dataset.armed){lsDel("zangyo-code");location.hash="";showLogin();}else{a.dataset.armed="1";a.textContent="もう一度押すと外れます";}};
+  };
+  render();
+}
+function showLogin(err){
+  $app.innerHTML=topbar()+`<main class="wrap"><div class="login">
+    <h1>自分の時間外を見る</h1>
+    <p style="margin:0">助役からもらったカードの<b>QRコード</b>をスマホのカメラで読み取ってください。<br>または、カードに書いてある12文字のコードを入れてください。</p>
+    <form class="form" id="loginForm"><div><label for="code">コード（例：ABCD-EFGH-JKLM）</label><input id="code" class="code-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="latin"></div>
+    <button class="btn" type="submit">開く</button></form>
+    ${err?`<div class="msg err">${esc(err)}</div>`:""}
+    <p class="note">一度開けば、次からは自動で開きます。ホーム画面に追加しておくと便利です。</p>
+    <p class="note"><a href="#admin">助役メニュー</a></p>
+  </div></main>`;
+  document.getElementById("loginForm").onsubmit=e=>{e.preventDefault();const c=normCode(document.getElementById("code").value);if(c.length!==12)return showLogin("コードは12文字です。");location.hash=c;route();};
+}
+
+/* ================= 助役の画面 ================= */
+const DEFAULT_JOB_HASH={"5196a152c71420af98ee":"主任","45a720a030b9f00ac491":"主任"}; /* シート下欄が前任者のままの人の職名 */
+const DEFAULT_EXCLUDED_HASH=["905074fed72cbfa636e0","97fc314d41e8544f14ad"]; /* 異動で管区外になった人（名前は載せず、照合用の値だけ） */
+async function exHash(id){const h=new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode("ex|"+id)));return Array.from(h.slice(0,10),x=>x.toString(16).padStart(2,"0")).join("");}
+const ADM={unlocked:false,pw:null,salt:null,roster:{people:{},settings:{...DEFAULT_SETTINGS},excluded:[],unexcluded:[]},store:{},dirty:false,month:null,detail:null,msgs:[]};
+
+function admLevelRank(l){return l==="stop"?0:l==="caution"?1:2;}
+function admSummaries(){
+  const today=todayStr();
+  return Object.values(ADM.store).map(p=>{
+    const q={...p,settings:ADM.roster.settings};
+    const view=ADM.month?{...q}:q;
+    const s=summarize(view,today,[]);
+    let m=null;if(ADM.month&&p.months[ADM.month]){m=sumMonth(p.months[ADM.month],today);}
+    return {p,s,m};
+  });
+}
+
+function admLockedHtml(first,err){
+  return topbar("助役メニュー")+`<main class="wrap"><div class="login">
+    <h1>${first?"はじめての設定":"助役メニューを開く"}</h1>
+    ${first?`<p style="margin:0">助役の皆さんで共有する<b>パスワード</b>を決めてください。8文字以上。忘れると全員分のデータを作り直すことになるので、紙に書いて金庫などに保管してください。</p>`:`<p style="margin:0">助役用のパスワードを入れてください。</p>`}
+    <form class="form" id="admForm">
+      <div><label for="pw1">パスワード</label><input id="pw1" type="password" autocomplete="current-password" style="width:100%"></div>
+      ${first?`<div><label for="pw2">もう一度</label><input id="pw2" type="password" style="width:100%"></div>`:""}
+      <button class="btn" type="submit">${first?"決めて始める":"開く"}</button>
+    </form>
+    ${err?`<div class="msg err">${esc(err)}</div>`:""}
+    <p class="note"><a href="#">個人の画面にもどる</a></p>
+  </div></main>`;
+}
+async function showAdmin(){
+  if(DEMO){ADM.unlocked=true;return renderAdmin();}
+  if(ADM.unlocked) return renderAdmin();
+  const first=!(DATA&&DATA.admin);
+  $app.innerHTML=admLockedHtml(first);
+  bindAdmLogin(first);
+}
+function bindAdmLogin(first){
+  document.getElementById("admForm").onsubmit=async e=>{
+    e.preventDefault();
+    const pw=document.getElementById("pw1").value;
+    if(first){
+      const pw2=document.getElementById("pw2").value;
+      if(pw.length<8){$app.innerHTML=admLockedHtml(true,"8文字以上にしてください");return bindAdmLogin(true);}
+      if(pw!==pw2){$app.innerHTML=admLockedHtml(true,"2回の入力が違います");return bindAdmLogin(true);}
+      ADM.pw=pw;ADM.salt=crypto.getRandomValues(new Uint8Array(16));ADM.unlocked=true;ADM.dirty=true;return renderAdmin();
+    }
+    try{
+      const salt=unb64(DATA.admin.salt);
+      const key=await pbkdf2(pw,salt,300000);
+      const roster=await unseal(key,DATA.admin);
+      ADM.pw=pw;ADM.salt=salt;ADM.roster=roster;ADM.roster.settings=ADM.roster.settings||{...DEFAULT_SETTINGS};if(!Array.isArray(ADM.roster.excluded))ADM.roster.excluded=[];if(!Array.isArray(ADM.roster.unexcluded))ADM.roster.unexcluded=[];
+      $app.innerHTML=topbar("助役メニュー")+`<main class="wrap"><p style="margin-top:30px">全員分を読み込んでいます…</p></main>`;
+      for(const [id,r] of Object.entries(roster.people)){
+        const tag=await codeTag(r.code);const box=DATA.people[tag];
+        if(box){try{ADM.store[id]=await unseal(await codeKey(r.code),box);}catch(_){}}
+        if(!ADM.store[id])ADM.store[id]={id,name:r.name,job:r.job,no:r.no,months:{}};
+      }
+      ADM.unlocked=true;renderAdmin();
+    }catch(err){$app.innerHTML=admLockedHtml(false,"パスワードが違います");bindAdmLogin(false);}
+  };
+}
+
+function isExcluded(id){return (ADM.roster.excluded||[]).some(x=>x.id===id);}
+async function applyDefaultExclusion(id,name){
+  if(isExcluded(id)||(ADM.roster.unexcluded||[]).includes(id))return;
+  if(DEFAULT_EXCLUDED_HASH.includes(await exHash(id)))ADM.roster.excluded.push({id,name});
+}
+function allMonthKeys(){const s=new Set();for(const p of Object.values(ADM.store))for(const k of Object.keys(p.months||{}))s.add(k);return [...s].sort();}
+
+function renderAdmin(){
+  document.body.classList.add("wide");
+  const keys=allMonthKeys();
+  const curKey=periodKey(todayStr());
+  if(!ADM.month||!keys.includes(ADM.month)) ADM.month=keys.includes(curKey)?curKey:keys[keys.length-1]||null;
+  if(ADM.detail&&ADM.store[ADM.detail]) return renderAdminDetail();
+  const today=todayStr();
+  const rows=Object.values(ADM.store).map(p=>{
+    const q={...p,settings:ADM.roster.settings};
+    // 選んだ月を「今月」として集計
+    const s=summarize(q,ADM.month&&ADM.month!==periodKey(today)?periodRange(ADM.month).to:today,[]);
+    return {p,s};
+  }).sort((a,b)=>admLevelRank(a.s.level)-admLevelRank(b.s.level)||b.s.otEff-a.s.otEff);
+  const cnt={stop:0,caution:0,go:0,six:0};rows.forEach(r=>{cnt[r.s.level]++;if(r.s.count>=MAX_TIMES)cnt.six++;});
+  const gh=lsGet("zangyo-gh",{});
+  const table=rows.length?`<div class="tbl-wrap"><table class="adm-table"><thead><tr><th>状態</th><th>氏名</th><th>職名</th><th class="r">時間外</th><th class="r">45hまで</th><th class="r">休日含む</th><th class="r">45h超え回数</th><th class="r">年間計</th><th>ひとこと</th></tr></thead><tbody>
+    ${rows.map(({p,s})=>`<tr data-id="${esc(p.id)}" tabindex="0"><td><span class="pill ${s.level}">${s.level==="stop"?"停止":s.level==="caution"?"注意":"進行"}</span></td><td><b>${esc(p.name)}</b></td><td>${esc(p.job||"")}</td><td class="r num"><b>${hmShort(s.otEff)}</b></td><td class="r num">${s.remain>0?hmShort(s.remain):"超過"}</td><td class="r num">${hmShort(s.t80)}</td><td class="r num">${s.count} / 6</td><td class="r num">${hmShort(s.annual)}</td><td>${esc(s.title)}</td></tr>`).join("")}
+    </tbody></table></div>`:`<p class="note">まだデータがありません。上の枠にグリーン表のExcelを入れてください。</p>`;
+  $app.innerHTML=topbar("助役メニュー",DEMO?"見本データ":"")+`<main class="wrap">
+    <div class="drop" id="drop"><p style="margin:0 0 10px"><b>グリーン表のExcelファイル</b>をここに入れてください（何個でも一度に入れられます）</p>
+      <label class="btn" for="xl" style="display:inline-block">ファイルを選ぶ</label><input id="xl" type="file" accept=".xlsx,.xlsm,.xls" multiple hidden>
+      <p class="note">新しいグリーン表を入れると、同じ月度の数字が置き換わります。前の月度の数字は残ります。</p></div>
+    ${ADM.msgs.map(m=>`<div class="msg ${m.t}">${m.h}</div>`).join("")}
+    <div class="detail-head"><h2 style="margin:0;font-size:22px">${ADM.month?periodLabel(ADM.month):"—"} の一覧</h2>
+      ${keys.length>1?`<select id="mSel">${keys.map(k=>`<option value="${k}" ${k===ADM.month?"selected":""}>${periodLabel(k)}</option>`).join("")}</select>`:""}</div>
+    <div class="sumchips"><div class="sumchip stop"><b class="num">${cnt.stop}</b>停止（超えた）</div><div class="sumchip caution"><b class="num">${cnt.caution}</b>注意（近い）</div><div class="sumchip go"><b class="num">${cnt.go}</b>進行（大丈夫）</div><div class="sumchip"><b class="num">${cnt.six}</b>45h超え6回に到達</div></div>
+    <p class="note">行を押すと、その人の画面（本人が見ている画面と同じもの）を開きます。</p>
+    ${table}
+    <section class="panel"><h3>みんなのスマホに届ける</h3>
+      ${ADM.dirty?`<div class="msg warn" style="margin-top:0">まだ公開していない変更があります。</div>`:`<p class="note" style="margin-top:0">公開済みです。</p>`}
+      <div class="btn-row">
+        <button class="btn pink" id="pubGh" ${DEMO||!gh.token?"disabled":""}>みんなに公開する</button>
+        <button class="btn sub" id="pubDl" ${DEMO?"disabled":""}>公開用ファイル（data.json）を保存</button>
+        <button class="btn sub" id="qrAll" ${rows.length?"":"disabled"}>全員のQRカードを印刷</button>
+      </div>
+      ${!gh.token&&!DEMO?`<p class="note">「みんなに公開する」ボタンを使うには、下の設定でGitHubの情報を一度だけ入れてください。それまでは data.json を保存して、GitHubの画面からアップロードしてください。</p>`:""}
+      <p class="note">公開してから数分で、全員のスマホの数字が新しくなります。</p>
+      <div id="pubMsg"></div>
+    </section>
+    <details class="panel"><summary style="font-weight:700;font-size:18px;cursor:pointer">設定</summary>
+      <div class="grid2" style="margin-top:12px">
+        <div><label class="note" for="ys">1年の始まり（この日から数える）</label><input id="ys" type="date" value="${ADM.roster.settings.yearStart}"></div>
+        <div><label class="note" for="ye">1年の終わり（締め日）</label><input id="ye" type="date" value="${ADM.roster.settings.yearEnd}"></div>
+      </div>
+      <h4 style="margin:18px 0 6px">GitHub（このパソコンだけに保存されます）</h4>
+      <div class="grid2">
+        <div><label class="note" for="ghOwner">アカウント名</label><input id="ghOwner" value="${esc(gh.owner||"kunugiyamao-arch")}"></div>
+        <div><label class="note" for="ghRepo">リポジトリ名</label><input id="ghRepo" value="${esc(gh.repo||"zangyo")}"></div>
+        <div><label class="note" for="ghToken">トークン</label><input id="ghToken" type="password" value="${esc(gh.token||"")}" autocomplete="off"></div>
+      </div>
+      <h4 style="margin:18px 0 6px">除外している人（異動・退職）</h4>
+      <p class="note" style="margin-top:0">ここにいる人は、グリーン表にシートが残っていても読み込みません。</p>
+      ${ADM.roster.excluded.length?`<div class="chips">${ADM.roster.excluded.map((x,i)=>`<span class="chip">${esc(x.name)}　<button type="button" class="btn sub" style="padding:2px 8px;font-size:13px" data-unex="${i}">戻す</button></span>`).join("")}</div>`:`<p class="note">いません</p>`}
+      <div class="btn-row" style="margin-top:12px"><button class="btn sub" id="saveSet">設定を保存</button><span id="setMsg" class="note"></span></div>
+    </details>
+    <div class="foot"><span>${DEMO?"見本データで動いています":"データ更新："+(DATA&&DATA.updated?new Date(DATA.updated).toLocaleString("ja-JP"):"まだ")}</span><a href="#">個人の画面へ</a></div>
+  </main>`;
+  bindAdmin();
+}
+
+function bindAdmin(){
+  const drop=document.getElementById("drop"),xl=document.getElementById("xl");
+  xl.onchange=()=>importFiles([...xl.files]);
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add("hover");};
+  drop.ondragleave=()=>drop.classList.remove("hover");
+  drop.ondrop=e=>{e.preventDefault();drop.classList.remove("hover");importFiles([...e.dataTransfer.files]);};
+  const ms=document.getElementById("mSel");if(ms)ms.onchange=()=>{ADM.month=ms.value;renderAdmin();};
+  document.querySelectorAll(".adm-table tr[data-id]").forEach(tr=>{const go=()=>{ADM.detail=tr.dataset.id;renderAdmin();window.scrollTo(0,0);};tr.onclick=go;tr.onkeydown=e=>{if(e.key==="Enter")go();};});
+  document.getElementById("pubGh").onclick=publishGitHub;
+  document.getElementById("pubDl").onclick=publishDownload;
+  document.getElementById("qrAll").onclick=()=>printCards(Object.keys(ADM.store));
+  document.querySelectorAll("[data-unex]").forEach(b=>b.onclick=()=>{{const x=ADM.roster.excluded.splice(+b.dataset.unex,1)[0];if(x&&!ADM.roster.unexcluded.includes(x.id))ADM.roster.unexcluded.push(x.id);}ADM.dirty=true;ADM.msgs=[{t:"ok",h:"除外を戻しました。もう一度グリーン表を入れると一覧に出ます。"}];renderAdmin();});
+  document.getElementById("saveSet").onclick=()=>{
+    const ys=document.getElementById("ys").value,ye=document.getElementById("ye").value;
+    if(ys&&ye&&ys<ye&&(ys!==ADM.roster.settings.yearStart||ye!==ADM.roster.settings.yearEnd)){ADM.roster.settings={yearStart:ys,yearEnd:ye};ADM.dirty=true;}
+    lsSet("zangyo-gh",{owner:document.getElementById("ghOwner").value.trim(),repo:document.getElementById("ghRepo").value.trim(),token:document.getElementById("ghToken").value.trim()});
+    renderAdmin();
+  };
+}
+
+let xlsxReady=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("読み込み失敗: "+src));document.head.appendChild(s);});}
+function needXLSX(){if(window.XLSX)return Promise.resolve();return xlsxReady||(xlsxReady=loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"));}
+
+async function importFiles(files){
+  ADM.msgs=[];
+  try{await needXLSX();}catch(e){ADM.msgs.push({t:"err",h:"Excelを読む部品を読み込めませんでした。インターネットにつながっているか確かめてください。"});return renderAdmin();}
+  let n=0;const months=new Set();const added=[];const skipped=new Set();
+  for(const f of files){
+    try{
+      const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+      const r=parseWorkbook(wb,f.name);
+      for(const pp of r.people)await applyDefaultExclusion(pp.id,pp.name);
+      r.warnings.filter(w=>!(w.prev&&isExcluded(w.prev))).forEach(w=>ADM.msgs.push({t:"warn",h:esc(w.text||w)}));
+      for(const pp of r.people){
+        if(isExcluded(pp.id)){skipped.add(pp.name);if(ADM.store[pp.id]||ADM.roster.people[pp.id]){delete ADM.store[pp.id];delete ADM.roster.people[pp.id];ADM.dirty=true;}continue;}
+        if(!ADM.roster.people[pp.id]){ADM.roster.people[pp.id]={code:newCode(),name:pp.name,job:"",no:""};added.push(pp.name);}
+        const ro=ADM.roster.people[pp.id];ro.name=pp.name;
+        const footOk=!(pp.prev&&isExcluded(pp.prev));
+        if(footOk&&pp.job&&!ro.jobManual)ro.job=pp.job;if(footOk&&pp.no&&!ro.noManual)ro.no=pp.no;
+        if(!ro.job){const pj=DEFAULT_JOB_HASH[await exHash(pp.id)];if(pj)ro.job=pj;}
+        const st=ADM.store[pp.id]||(ADM.store[pp.id]={id:pp.id,months:{}});
+        st.name=ro.name;st.job=ro.job;st.no=ro.no;
+        const rg=periodRange(pp.key);
+        st.months[pp.key]={from:rg.from,to:rg.to,days:pp.days};
+        n++;months.add(pp.key);
+      }
+    }catch(e){ADM.msgs.push({t:"err",h:`「${esc(f.name)}」を読めませんでした（${esc(e.message)}）`});}
+  }
+  if(n){ADM.dirty=true;ADM.month=[...months].sort().pop();
+    ADM.msgs.unshift({t:"ok",h:`${[...months].map(periodLabel).join("・")} のグリーン表を ${n} 人分読み込みました。${added.length?`新しく登録した人：${added.length}人（QRカードの印刷が必要です）。`:""}${skipped.size?`除外した人：${[...skipped].map(esc).join("、")}`:""}`});}
+  renderAdmin();
+}
+
+function renderAdminDetail(){
+  const p=ADM.store[ADM.detail];const r=ADM.roster.people[ADM.detail]||{};
+  const q={...p,settings:ADM.roster.settings,asOf:todayStr()};
+  $app.innerHTML=topbar(p.name,p.job)+`<main class="wrap" style="max-width:720px">
+    <div class="detail-head"><button class="btn sub" id="back">← 一覧にもどる</button>
+      <div class="btn-row"><button class="btn sub" id="qrOne">この人のQRカードを印刷</button></div></div>
+    <p class="note">本人のスマホにはこの画面が出ます。コード：<b class="num">${esc(fmtCode(r.code||""))}</b></p>
+    <form class="panel form" id="infoForm" style="margin-top:8px"><div class="row">
+      <div><label for="eJob">職名</label><input id="eJob" type="text" value="${esc(r.job||"")}" style="width:11em"></div>
+      <div><label for="eNo">社員番号</label><input id="eNo" type="text" inputmode="numeric" value="${esc(r.no||"")}" style="width:8em"></div>
+      <button class="btn sub" type="submit">保存</button><span id="infoMsg" class="note" style="margin:0"></span></div>
+      <p class="note" style="margin:0">ここで直した内容は、次にグリーン表を入れても上書きされません。</p></form>
+    ${personHtml(q,{})}
+    <section class="panel"><h3>この人の管理</h3>
+      <div class="btn-row"><button class="btn sub" id="reCode">コードを作り直す</button><button class="btn sub" id="rmP">一覧から外す（異動・退職）</button></div>
+      <div id="cf"></div>
+      <p class="note">コードを作り直すと、前のQRカードは使えなくなります（カードをなくした時など）。一覧から外した人は「設定」の除外リストに入り、次からグリーン表を入れても読み込みません。</p></section>
+  </main>`;
+  document.getElementById("back").onclick=()=>{ADM.detail=null;renderAdmin();};
+  document.getElementById("qrOne").onclick=()=>printCards([ADM.detail]);
+  const ask=(txt,fn)=>{const cf=document.getElementById("cf");cf.innerHTML=`<div class="confirm msg warn">${txt}<button class="btn sub" id="yes">はい</button><button class="btn sub" id="no">やめる</button></div>`;document.getElementById("yes").onclick=fn;document.getElementById("no").onclick=()=>cf.innerHTML="";};
+  document.getElementById("infoForm").onsubmit=e=>{e.preventDefault();
+    const j=document.getElementById("eJob").value.trim(),n=document.getElementById("eNo").value.trim().normalize("NFKC");
+    if(j!==(r.job||"")){r.job=j;r.jobManual=true;}if(n!==(r.no||"")){r.no=n;r.noManual=true;}
+    p.job=r.job;p.no=r.no;ADM.dirty=true;renderAdminDetail();document.getElementById("infoMsg").textContent="保存しました（公開すると本人の画面にも出ます）";};
+  document.getElementById("reCode").onclick=()=>ask("新しいコードにしますか？",()=>{r.code=newCode();ADM.dirty=true;renderAdminDetail();});
+  document.getElementById("rmP").onclick=()=>ask(`${esc(p.name)}さんを一覧から外しますか？`,()=>{ADM.roster.excluded.push({id:ADM.detail,name:p.name});ADM.roster.unexcluded=ADM.roster.unexcluded.filter(x=>x!==ADM.detail);delete ADM.store[ADM.detail];delete ADM.roster.people[ADM.detail];ADM.detail=null;ADM.dirty=true;renderAdmin();});
+}
+
+async function buildDataJson(){
+  const today=todayStr();
+  const out={v:1,updated:new Date().toISOString(),people:{}};
+  for(const [id,r] of Object.entries(ADM.roster.people)){
+    const p=ADM.store[id];if(!p)continue;
+    const payload={id,name:r.name,job:r.job||"",no:r.no||"",months:p.months,settings:ADM.roster.settings,asOf:today};
+    out.people[await codeTag(r.code)]=await seal(await codeKey(r.code),payload);
+  }
+  const akey=await pbkdf2(ADM.pw,ADM.salt,300000);
+  out.admin={salt:b64(ADM.salt),...(await seal(akey,ADM.roster))};
+  return out;
+}
+function pubMsg(t,h){document.getElementById("pubMsg").innerHTML=`<div class="msg ${t}">${h}</div>`;}
+async function publishDownload(){
+  pubMsg("warn","作っています…");
+  const data=await buildDataJson();
+  const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="data.json";document.body.appendChild(a);a.click();a.remove();
+  DATA=data;ADM.dirty=false;
+  pubMsg("ok","data.json を保存しました。GitHubの zangyo リポジトリで「Add file → Upload files」から上書きしてください。");
+}
+async function publishGitHub(){
+  const gh=lsGet("zangyo-gh",{});
+  pubMsg("warn","公開しています…");
+  try{
+    const data=await buildDataJson();
+    const url=`https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}/contents/data.json`;
+    const h={Authorization:"Bearer "+gh.token,Accept:"application/vnd.github+json"};
+    let sha;const g=await fetch(url,{headers:h,cache:"no-store"});
+    if(g.ok)sha=(await g.json()).sha;else if(g.status!==404)throw new Error(g.status===401?"トークンが正しくありません":"GitHubの応答 "+g.status);
+    const body={message:"時間外データ更新 "+new Date().toLocaleString("ja-JP"),content:b64(enc.encode(JSON.stringify(data)))};if(sha)body.sha=sha;
+    const r=await fetch(url,{method:"PUT",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok)throw new Error(r.status===401||r.status===403?"トークンの権限が足りません":"GitHubの応答 "+r.status);
+    DATA=data;ADM.dirty=false;renderAdmin();pubMsg("ok","公開しました。数分で全員のスマホに反映されます。");
+  }catch(e){pubMsg("err","公開できませんでした："+esc(e.message)+"。かわりに data.json を保存してアップロードしてください。");}
+}
+
+let qrReady=null;
+async function printCards(ids){
+  if(DEMO){alertMsg("見本では印刷できません");return;}
+  try{await (qrReady||(qrReady=loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js")));}catch(e){return alertMsg("QRコードの部品を読み込めませんでした");}
+  const base=location.href.split("#")[0];
+  const pa=document.getElementById("printArea");pa.innerHTML="";
+  for(const id of ids){
+    const r=ADM.roster.people[id];if(!r)continue;
+    const card=document.createElement("div");card.className="qcard";
+    card.innerHTML=`<div class="qr"></div><div><h4>${esc(r.name)} さん</h4><p><b>時間外チェック</b>　自分専用のカード</p><p>スマホのカメラでQRコードを読み取ると、自分の時間外が見られます。</p><p>コード：<span class="code">${esc(fmtCode(r.code))}</span></p><p style="font-size:8.5pt">他の人には見せないでください。なくした時は助役へ。</p></div>`;
+    pa.appendChild(card);
+    new QRCode(card.querySelector(".qr"),{text:base+"#"+r.code,width:256,height:256,correctLevel:QRCode.CorrectLevel.M});
+  }
+  setTimeout(()=>window.print(),400);
+  if(ADM.dirty) alertMsg("カードを配る前に「みんなに公開する」を押してください（新しい人の分が公開されていないと開けません）。");
+}
+function alertMsg(t){const el=document.getElementById("pubMsg")||document.getElementById("cf");if(el)el.innerHTML=`<div class="msg warn">${esc(t)}</div>`;}
+
+/* ================= 見本データ（Claude上で見るための架空の数字） ================= */
+function demoPerson(name,job,targets,holCur){
+  const months={};const keys=["2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10"];
+  keys.forEach((k,ki)=>{
+    const rg=periodRange(k);const days=[];let d=parseYmd(rg.from);const end=parseYmd(rg.to);let i=ki;
+    while(d<=end){const ph=i%3;days.push({d:ymd(d),k:ph===0?"隔勤":ph===1?"隔勤":"公休",ot:0,hol:0});d.setDate(d.getDate()+1);i++;}
+    const work=days.filter(x=>x.k==="隔勤");const t=targets[ki];
+    work.forEach((x,j)=>{x.ot=Math.round(t/work.length/5)*5;});
+    const diff=t-work.reduce((a,x)=>a+x.ot,0);work[0].ot+=diff;
+    if(k==="2026-10"&&holCur){const off=days.filter(x=>x.k==="公休");off[1].k="公出(法定)";off[1].hol=holCur;}
+    months[k]={from:rg.from,to:rg.to,days};
+  });
+  return {id:normName(name),name,job,no:"",months,settings:{yearStart:"2026-03-16",yearEnd:"2027-03-15"},asOf:"2026-10-02"};
+}
+const DEMO_PEOPLE=[
+  demoPerson("見本 一郎","駅営業主任",[2600,2950,2400,2980,3010,2900,2480].map(x=>x),0),
+  demoPerson("見本 二郎","駅営業係",[1800,2000,2100,1900,2200,2300,2830],0),
+  demoPerson("見本 三郎","主任",[1200,1300,1500,1100,1400,1250,1320],0),
+  demoPerson("見本 四郎","駅統轄主任",[2800,2760,2900,2950,2720,2880,2160],0),
+  demoPerson("見本 五郎","駅営業係",[2000,2100,1900,2200,2000,2100,2350],2100),
+];
+
+/* ================= 起動 ================= */
+async function loadData(){
+  try{const r=await fetch("data.json?t="+Date.now(),{cache:"no-store"});if(r.ok)return await r.json();}catch(e){}
+  return null;
+}
+function demoBar(){
+  const isAdm=VIEW.mode==="admin";
+  const names=DEMO_PEOPLE.map((p,i)=>`<option value="${i}" ${i===VIEW.demoIdx?"selected":""}>${p.name}</option>`).join("");
+  return `<div class="demo-bar"><div class="wrap"><b>見本（架空の数字）</b>
+    <div class="seg"><button id="dP" aria-pressed="${!isAdm}">社員の画面</button><button id="dA" aria-pressed="${isAdm}">助役の画面</button></div>
+    ${isAdm?"":`<select id="dSel" aria-label="見本の人">${names}</select>`}</div></div>`;
+}
+function renderDemo(){
+  if(VIEW.mode==="admin"){
+    if(!ADM.unlocked){ADM.unlocked=true;DEMO_PEOPLE.forEach(p=>{ADM.store[p.id]=JSON.parse(JSON.stringify(p));ADM.roster.people[p.id]={code:newCode(),name:p.name,job:p.job,no:""};});ADM.roster.settings={yearStart:"2026-03-16",yearEnd:"2027-03-15"};}
+    renderAdmin();
+  }else{
+    document.body.classList.remove("wide");
+    const p=DEMO_PEOPLE[VIEW.demoIdx];const key="zangyo-demo-self-"+VIEW.demoIdx;
+    const render=()=>{$app.innerHTML=topbar(p.name,p.job)+`<main class="wrap">${personHtml(p,{selfKey:key,today:"2026-10-02"})}<div class="foot"><span>見本の基準日：2026年10月2日</span></div></main>`;bindSelf(key,render);addDemoBar();};
+    render();return;
+  }
+  addDemoBar();
+}
+function addDemoBar(){
+  $app.insertAdjacentHTML("afterbegin",demoBar());
+  document.getElementById("dP").onclick=()=>{VIEW.mode="person";ADM.detail=null;renderDemo();};
+  document.getElementById("dA").onclick=()=>{VIEW.mode="admin";renderDemo();};
+  const s=document.getElementById("dSel");if(s)s.onchange=()=>{VIEW.demoIdx=+s.value;renderDemo();};
+}
+async function route(){
+  if(DEMO){VIEW.demoIdx=VIEW.demoIdx??0;return renderDemo();}
+  const h=decodeURIComponent(location.hash.slice(1));
+  if(h==="admin"){VIEW.mode="admin";return showAdmin();}
+  document.body.classList.remove("wide");
+  VIEW.mode="person";
+  if(!DATA) return showLogin(location.protocol==="file:"?"このファイルはサーバーに置いて開いてください。":"データをまだ読み込めません。少したってから開き直してください。");
+  const code=normCode(h)||lsGet("zangyo-code","");
+  if(code&&code.length===12) return showPerson(code);
+  showLogin();
+}
+window.addEventListener("hashchange",route);
+(async()=>{ if(!DEMO) DATA=await loadData(); route(); })();
+</script>
+
+</body></html>
