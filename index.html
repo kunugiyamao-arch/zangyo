@@ -228,14 +228,14 @@ const WD="日月火水木金土";
 
 /* --- グリーン表1行分の時間外（勤務表の60H計算列と同じ式） ---
    AV: 日勤なら所定/法定差 27分   AW = 早出居残明出(U) − AV
-   AO: AW>0 のとき AW（点呼分に〇があれば −30分）
+   AO: AW>0 のとき AW（点呼分に〇があれば −30分。AWが30分未満なら差し引かない）
    AP: 公休出勤・法定外(X)       AQ: 深夜計(Y) − 公出深夜(Z,AA)（AW<0なら相殺）
    AR: 公出深夜・法定外(AA)       AS/AT: 徹夜回数があれば5時間
    法定休日の労働（W・Z）は時間外に入れず、80時間の判定だけに加える */
 function dayOvertime(c){
   const av = c.D ? 27 : 0;
   const aw = c.U - av;
-  const ao = aw<=0 ? 0 : (c.AN ? aw-30 : aw);
+  const ao = aw<=0 ? 0 : (c.AN ? (aw<30 ? aw : aw-30) : aw);  /* 新しいグリーン表の式：30分未満なら差し引かない */
   const aq = aw>=0 ? (c.Y - c.Z - c.AA) : Math.max(0, c.Y - c.Z - c.AA + aw);
   const tetsu = (c.AB && c.E && !c.F) ? 300 : 0;
   return { ot: ao + c.X + aq + c.AA + tetsu, hol: c.W + c.Z };
@@ -256,13 +256,18 @@ function isCircle(ws,a){const v=cellVal(ws,a);return v!=null&&CIRCLE.test(String
 function serialToYmd(v){const d=new Date(Math.round((v-25569)*86400000));return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate());}
 const KIND_COLS=[["D","日勤"],["E","隔勤"],["F","公出(法定)"],["G","公出"],["H","公休(法定)"],["I","公休"],["J","年休"],["K","特休"],["L","生休"],["M","その他(有)"],["N","その他(無)"],["O","公傷"],["P","病欠"],["Q","私欠"]];
 function normName(s){return String(s||"").replace(/[\s　]/g,"");}
+/* 同じ人かどうかの照合用（字体の違いを吸収） */
+function nameKey(s){return normName(String(s||"").normalize("NFKC")).replace(/滿/g,"満").replace(/[邊邉]/g,"辺").replace(/髙/g,"高").replace(/﨑/g,"崎").replace(/濵/g,"浜").replace(/[齋齊]/g,"斎").replace(/德/g,"徳");}
 
 function parseWorkbook(wb, fileName){
   const out={people:[],warnings:[],monthKeys:new Set()};
   for(const sn of wb.SheetNames){
     const ws=wb.Sheets[sn];
     const a6=cellVal(ws,"A6"); if(typeof a6!=="number") continue;
-    const id=normName(sn); if(!id) continue;
+    const hasNoPrefix=/^\s*\d+\s*[_＿]/.test(sn);
+    const snName=sn.trim().replace(/^\s*\d+\s*[_＿]\s*/,"");
+    const generic=/グリーン表|勤務表|^sheet\d*$/i.test(snName);
+    if(!normName(snName)) continue;
     const days=[];
     const rows=[];for(let r=6;r<=21;r++)rows.push(r);for(let r=26;r<=40;r++)rows.push(r);
     for(const r of rows){
@@ -278,10 +283,13 @@ function parseWorkbook(wb, fileName){
     if(!days.length) continue;
     const key=periodKey(days[0].d);
     out.monthKeys.add(key);
-    const nm57=normName(cellVal(ws,"D57"));
-    let no=cellVal(ws,"A57"), job=cellVal(ws,"Q57"), prev="";
-    if(nm57 && nm57!==id){ out.warnings.push({prev:nm57,text:`「${sn.trim()}」のシートは、下の氏名欄が「${String(cellVal(ws,"D57")).trim()}」になっています。シート名の「${sn.trim()}」さんとして登録しました`}); prev=nm57; }
-    out.people.push({id,name:sn.trim(),no:no!=null?String(no):"",job:job?String(job).trim():"",prev,key,days});
+    const d57=String(cellVal(ws,"D57")??"").trim();
+    const nm57=normName(d57);
+    let no=cellVal(ws,"A57"), job=cellVal(ws,"Q57"), prev="", name=snName;
+    if(hasNoPrefix||generic){ if(!nm57) continue; name=d57.replace(/[\s　]+/g,"　"); }  /* 「社員番号_氏名」形式・「グリーン表」シートは下の氏名欄を使う */
+    else if(nm57 && nameKey(nm57)!==nameKey(snName)){ out.warnings.push({prev:nm57,text:`「${snName}」のシートは、下の氏名欄が「${d57}」になっています。シート名の「${snName}」さんとして登録しました`}); prev=nm57; }
+    const id=normName(name);
+    out.people.push({id,name,no:no!=null&&String(no).trim()!==""?String(no).trim():"",job:job?String(job).trim():"",prev,key,days});
   }
   if(!out.people.length) out.warnings.push({text:`「${fileName}」にグリーン表のシートが見つかりませんでした`});
   return out;
@@ -582,6 +590,14 @@ function bindAdmLogin(first){
 }
 
 function isExcluded(id){return (ADM.roster.excluded||[]).some(x=>x.id===id);}
+/* 同じ人を探す：①社員番号 ②名前（字体の違いは同じとみなす） */
+function resolveId(pp){
+  const R=ADM.roster.people;
+  if(pp.no&&!pp.prev){for(const [id,r] of Object.entries(R))if(r.no&&String(r.no)===pp.no)return id;}
+  if(R[pp.id])return pp.id;
+  const k=nameKey(pp.name);for(const [id,r] of Object.entries(R))if(nameKey(r.name)===k)return id;
+  return pp.id;
+}
 async function applyDefaultExclusion(id,name){
   if(isExcluded(id)||(ADM.roster.unexcluded||[]).includes(id))return;
   if(DEFAULT_EXCLUDED_HASH.includes(await exHash(id)))ADM.roster.excluded.push({id,name});
@@ -617,7 +633,7 @@ function renderAdmin(){
     <p class="note">行を押すと、その人の画面（本人が見ている画面と同じもの）を開きます。</p>
     ${table}
     <section class="panel"><h3>みんなのスマホに届ける</h3>
-      ${ADM.dirty?`<div class="msg warn" style="margin-top:0">まだ公開していない変更があります。</div>`:`<p class="note" style="margin-top:0">公開済みです。</p>`}
+      ${ADM.dirty?`<div class="msg warn" style="margin-top:0">まだ公開していない変更があります。間違えた時は、画面を読み込み直す（F5）と公開前の状態に戻ります。</div>`:`<p class="note" style="margin-top:0">公開済みです。</p>`}
       <div class="btn-row">
         <button class="btn pink" id="pubGh" ${DEMO||!gh.token?"disabled":""}>みんなに公開する</button>
         <button class="btn sub" id="pubDl" ${DEMO?"disabled":""}>公開用ファイル（data.json）を保存</button>
@@ -641,6 +657,9 @@ function renderAdmin(){
       <h4 style="margin:18px 0 6px">除外している人（異動・退職）</h4>
       <p class="note" style="margin-top:0">ここにいる人は、グリーン表にシートが残っていても読み込みません。</p>
       ${ADM.roster.excluded.length?`<div class="chips">${ADM.roster.excluded.map((x,i)=>`<span class="chip">${esc(x.name)}　<button type="button" class="btn sub" style="padding:2px 8px;font-size:13px" data-unex="${i}">戻す</button></span>`).join("")}</div>`:`<p class="note">いません</p>`}
+      <h4 style="margin:18px 0 6px">取り込みのやり直し</h4>
+      <p class="note" style="margin-top:0">間違ったグリーン表を入れてしまった時に使います。全員の時間外の数字だけを消します。QRカードはそのまま使えます。消したあと、正しいグリーン表を入れ直してください。</p>
+      <button type="button" class="btn sub" id="resetNums">全員の数字を消す</button><div id="resetCf"></div>
       <div class="btn-row" style="margin-top:12px"><button class="btn sub" id="saveSet">設定を保存</button><span id="setMsg" class="note"></span></div>
     </details>
     <div class="foot"><span>${DEMO?"見本データで動いています":"データ更新："+(DATA&&DATA.updated?new Date(DATA.updated).toLocaleString("ja-JP"):"まだ")}</span><a href="#">個人の画面へ</a></div>
@@ -659,6 +678,9 @@ function bindAdmin(){
   document.getElementById("pubGh").onclick=publishGitHub;
   document.getElementById("pubDl").onclick=publishDownload;
   document.getElementById("qrAll").onclick=()=>printCards(Object.keys(ADM.store));
+  document.getElementById("resetNums").onclick=()=>{const cf=document.getElementById("resetCf");cf.innerHTML=`<div class="confirm msg warn">全員の数字を消しますか？<button type="button" class="btn sub" id="rsYes">消す</button><button type="button" class="btn sub" id="rsNo">やめる</button></div>`;
+    document.getElementById("rsNo").onclick=()=>cf.innerHTML="";
+    document.getElementById("rsYes").onclick=()=>{for(const p of Object.values(ADM.store))p.months={};ADM.dirty=true;ADM.msgs=[{t:"ok",h:"全員の数字を消しました。正しいグリーン表を入れてください。"}];renderAdmin();};};
   document.querySelectorAll("[data-unex]").forEach(b=>b.onclick=()=>{{const x=ADM.roster.excluded.splice(+b.dataset.unex,1)[0];if(x&&!ADM.roster.unexcluded.includes(x.id))ADM.roster.unexcluded.push(x.id);}ADM.dirty=true;ADM.msgs=[{t:"ok",h:"除外を戻しました。もう一度グリーン表を入れると一覧に出ます。"}];renderAdmin();});
   document.getElementById("saveSet").onclick=()=>{
     const ys=document.getElementById("ys").value,ye=document.getElementById("ye").value;
@@ -683,13 +705,14 @@ async function importFiles(files){
       for(const pp of r.people)await applyDefaultExclusion(pp.id,pp.name);
       r.warnings.filter(w=>!(w.prev&&isExcluded(w.prev))).forEach(w=>ADM.msgs.push({t:"warn",h:esc(w.text||w)}));
       for(const pp of r.people){
-        if(isExcluded(pp.id)){skipped.add(pp.name);if(ADM.store[pp.id]||ADM.roster.people[pp.id]){delete ADM.store[pp.id];delete ADM.roster.people[pp.id];ADM.dirty=true;}continue;}
-        if(!ADM.roster.people[pp.id]){ADM.roster.people[pp.id]={code:newCode(),name:pp.name,job:"",no:""};added.push(pp.name);}
-        const ro=ADM.roster.people[pp.id];ro.name=pp.name;
-        const footOk=!(pp.prev&&isExcluded(pp.prev));
+        const id=resolveId(pp);
+        if(isExcluded(pp.id)||isExcluded(id)){skipped.add(pp.name);if(ADM.store[id]||ADM.roster.people[id]){delete ADM.store[id];delete ADM.roster.people[id];ADM.dirty=true;}continue;}
+        if(!ADM.roster.people[id]){ADM.roster.people[id]={code:newCode(),name:pp.name,job:"",no:""};added.push(pp.name);}
+        const ro=ADM.roster.people[id];ro.name=pp.name;
+        const pj=DEFAULT_JOB_HASH[await exHash(id)];if(pj&&!ro.jobManual){ro.job=pj;ro.jobManual=true;}
+        const footOk=!pp.prev;
         if(footOk&&pp.job&&!ro.jobManual)ro.job=pp.job;if(footOk&&pp.no&&!ro.noManual)ro.no=pp.no;
-        if(!ro.job){const pj=DEFAULT_JOB_HASH[await exHash(pp.id)];if(pj)ro.job=pj;}
-        const st=ADM.store[pp.id]||(ADM.store[pp.id]={id:pp.id,months:{}});
+        const st=ADM.store[id]||(ADM.store[id]={id,months:{}});
         st.name=ro.name;st.job=ro.job;st.no=ro.no;
         const rg=periodRange(pp.key);
         st.months[pp.key]={from:rg.from,to:rg.to,days:pp.days};
