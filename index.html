@@ -226,19 +226,12 @@ function hmShort(min){min=Math.round(min||0);const h=Math.floor(Math.abs(min)/60
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 const WD="日月火水木金土";
 
-/* --- グリーン表1行分の時間外（勤務表の60H計算列と同じ式） ---
-   AV: 日勤なら所定/法定差 27分   AW = 早出居残明出(U) − AV
-   AO: AW>0 のとき AW（点呼分に〇があれば −30分。AWが30分未満なら差し引かない）
-   AP: 公休出勤・法定外(X)       AQ: 深夜計(Y) − 公出深夜(Z,AA)（AW<0なら相殺）
-   AR: 公出深夜・法定外(AA)       AS/AT: 徹夜回数があれば5時間
-   法定休日の労働（W・Z）は時間外に入れず、80時間の判定だけに加える */
+/* --- グリーン表1行分の時間外（黄色い縦帯より左側の欄だけを使う） --- */
 function dayOvertime(c){
-  const av = c.D ? 27 : 0;
-  const aw = c.U - av;
-  const ao = aw<=0 ? 0 : (c.AN ? (aw<30 ? aw : aw-30) : aw);  /* 新しいグリーン表の式：30分未満なら差し引かない */
-  const aq = aw>=0 ? (c.Y - c.Z - c.AA) : Math.max(0, c.Y - c.Z - c.AA + aw);
-  const tetsu = (c.AB && c.E && !c.F) ? 300 : 0;
-  return { ot: ao + c.X + aq + c.AA + tetsu, hol: c.W + c.Z };
+  /* 黄色い縦帯（点呼の欄）より左側の数字だけで数える
+     時間外 ＝ 早出・居残・明出(U) ＋ 公休出勤・法定外(X) ＋ 深夜計(Y) − 公出深夜・法定(Z)
+     法定公休の出勤（W・Z）は時間外に入れず、80時間の判定だけに加える */
+  return { ot: c.U + c.X + c.Y - c.Z, hol: c.W + c.Z };
 }
 
 /* --- Excel（SheetJS）からの読み込み --- */
@@ -424,7 +417,7 @@ function daysHtml(p,s,today){
   }).join("");
   return `<details class="card"><summary>日ごとの内訳を見る</summary>
     <div class="tbl-wrap"><table><thead><tr><th>日付</th><th>勤務</th><th class="r">時間外</th><th class="r">法定休日出勤</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="note">グリーン表の数字です。点呼分（30分）・日勤の所定差（27分）を差し引き、徹夜は5時間で数えています。</p></details>`;
+    <p class="note">グリーン表の左側の数字です（早出・居残・明出＋公休出勤（法定外）＋深夜計。法定公休の出勤は時間外に入れていません）。</p></details>`;
 }
 
 /* 自分の記録 */
