@@ -499,8 +499,9 @@ async function showPerson(code){
   const selfKey="zangyo-self-"+tag;
   const render=()=>{
     $app.innerHTML=topbar(p.name,p.job)+`<main class="wrap">${personHtml(p,{selfKey})}
-      <div class="foot"><span>更新：${DATA.updated?new Date(DATA.updated).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span><span><a href="#" id="logout">この端末から外す</a>　<a href="#admin">助役メニュー</a></span></div></main>`;
+      <div class="foot"><span>更新：${DATA.updated?new Date(DATA.updated).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span><span><a href="#" id="refresh">最新の数字にする</a>　<a href="#" id="logout">この端末から外す</a>　<a href="#admin">助役メニュー</a></span></div></main>`;
     bindSelf(selfKey,render);
+    document.getElementById("refresh").onclick=async e=>{e.preventDefault();e.target.textContent="読み込み中…";const d=await loadData();if(d){DATA=d;DATA_LOADED=Date.now();}route();};
     document.getElementById("logout").onclick=e=>{e.preventDefault();const a=e.target;if(a.dataset.armed){lsDel("zangyo-code");location.hash="";showLogin();}else{a.dataset.armed="1";a.textContent="もう一度押すと外れます";}};
   };
   render();
@@ -866,6 +867,13 @@ async function route(){
   showLogin();
 }
 window.addEventListener("hashchange",route);
+/* スマホでアプリを開き直した時（画面に戻った時）に最新の数字を読み直す */
+let DATA_LOADED=Date.now();
+document.addEventListener("visibilitychange",async()=>{
+  if(document.visibilityState!=="visible"||DEMO||VIEW.mode!=="person")return;
+  if(Date.now()-DATA_LOADED<60000)return;
+  const d=await loadData(); if(d&&(!DATA||d.updated!==DATA.updated)){DATA=d;DATA_LOADED=Date.now();route();} else DATA_LOADED=Date.now();
+});
 (async()=>{ if(!DEMO) DATA=await loadData(); route(); })();
 </script>
 
