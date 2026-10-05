@@ -229,9 +229,11 @@ const WD="日月火水木金土";
 /* --- グリーン表1行分の時間外（黄色い縦帯より左側の欄だけを使う） --- */
 function dayOvertime(c){
   /* 黄色い縦帯（点呼の欄）より左側の数字だけで数える
-     時間外 ＝ 早出・居残・明出(U) ＋ 公休出勤・法定外(X) ＋ 深夜計(Y) − 公出深夜・法定(Z)
+     時間外 ＝ 早出・居残・明出(U) ＋ 公休出勤・法定外(X) ＋ 深夜計(Y) − 公出深夜・法定(Z) ＋ 徹夜5時間×回数（法定公休の日を除く）
      法定公休の出勤（W・Z）は時間外に入れず、80時間の判定だけに加える */
-  return { ot: c.U + c.X + c.Y - c.Z, hol: c.W + c.Z };
+  /* 徹夜は1回5時間。法定公休の日（公出・法定に〇）の徹夜だけは数えない */
+  const tetsu = (c.ABn>0 && !c.F) ? c.ABn*300 : 0;
+  return { ot: c.U + c.X + c.Y - c.Z + tetsu, hol: c.W + c.Z };
 }
 
 /* --- Excel（SheetJS）からの読み込み --- */
@@ -267,7 +269,7 @@ function parseWorkbook(wb, fileName){
       const a=cellVal(ws,"A"+r); if(typeof a!=="number") continue;
       const d=serialToYmd(a);
       const c={U:cellMin(ws,"U"+r),X:cellMin(ws,"X"+r),W:cellMin(ws,"W"+r),Y:cellMin(ws,"Y"+r),Z:cellMin(ws,"Z"+r),AA:cellMin(ws,"AA"+r),
-        D:isCircle(ws,"D"+r),E:filled(ws,"E"+r),F:isCircle(ws,"F"+r),AN:filled(ws,"AN"+r),AB:filled(ws,"AB"+r)};
+        D:isCircle(ws,"D"+r),E:filled(ws,"E"+r),F:isCircle(ws,"F"+r),AN:filled(ws,"AN"+r),AB:filled(ws,"AB"+r),ABn:(()=>{const v=cellVal(ws,"AB"+r);if(v==null||String(v).trim()==="")return 0;const n=Number(v);return isFinite(n)&&n>0?n:1;})()};
       const {ot,hol}=dayOvertime(c);
       let k="";for(const [col,lab] of KIND_COLS){const v=cellVal(ws,col+r);if(v!=null&&String(v).trim()!==""){k=CIRCLE.test(String(v).trim())?lab:String(v).trim();break;}}
       if(c.AB) k+=(k?"・":"")+"徹夜";
@@ -417,7 +419,7 @@ function daysHtml(p,s,today){
   }).join("");
   return `<details class="card"><summary>日ごとの内訳を見る</summary>
     <div class="tbl-wrap"><table><thead><tr><th>日付</th><th>勤務</th><th class="r">時間外</th><th class="r">法定休日出勤</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="note">グリーン表の左側の数字です（早出・居残・明出＋公休出勤（法定外）＋深夜計。法定公休の出勤は時間外に入れていません）。</p></details>`;
+    <p class="note">グリーン表の左側の数字です（早出・居残・明出＋公休出勤（法定外）＋深夜計＋徹夜1回5時間。法定公休の出勤と、法定公休の日の徹夜は時間外に入れていません）。</p></details>`;
 }
 
 /* 自分の記録 */
