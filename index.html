@@ -273,7 +273,7 @@ function parseWorkbook(wb, fileName){
       const {ot,hol}=dayOvertime(c);
       let k="";for(const [col,lab] of KIND_COLS){const v=cellVal(ws,col+r);if(v!=null&&String(v).trim()!==""){k=CIRCLE.test(String(v).trim())?lab:String(v).trim();break;}}
       if(c.AB) k+=(k?"・":"")+"徹夜";
-      days.push({d,ot,hol,k});
+      days.push({d,ot,hol,k,u:c.U});
     }
     if(!days.length) continue;
     const key=periodKey(days[0].d);
@@ -291,9 +291,13 @@ function parseWorkbook(wb, fileName){
 }
 
 /* --- 集計 --- */
+/* 工事騒音H：助役が印を付けた日は、早出・居残・明出から一律2時間を引く（2時間未満の日は引かない） */
+const NOISE=120;
+function noiseCut(x){ if(!x.h) return 0; const u=(x.u!=null)?x.u:x.ot; return u>=NOISE?NOISE:0; }
+function dayOt(x){ return x.ot-noiseCut(x); }
 function sumMonth(m, today){
   let ot=0,hol=0,otTo=0,holTo=0;
-  for(const x of m.days){ot+=x.ot;hol+=x.hol;if(x.d<=today){otTo+=x.ot;holTo+=x.hol;}}
+  for(const x of m.days){const o=dayOt(x);ot+=o;hol+=x.hol;if(x.d<=today){otTo+=o;holTo+=x.hol;}}
   return {ot,hol,otTo,holTo};
 }
 function summarize(p, today, selfEntries){
@@ -410,16 +414,19 @@ function monthsHtml(p,s){
   <p class="note">縦の線が45時間です。年間の合計 <b class="num">${hm(s.annual)}</b></p></section>`;
 }
 
-function daysHtml(p,s,today){
+function daysHtml(p,s,today,admin){
   const m=p.months[s.curKey]; if(!m) return "";
   const rows=m.days.map(x=>{
     const d=parseYmd(x.d),w=d.getDay();
     const cls=x.d===today?"today":(x.d>today?"future":"");
-    return `<tr class="${cls}"><td class="${w===0?"sun":w===6?"sat":""}">${d.getMonth()+1}/${d.getDate()}（${WD[w]}）</td><td>${esc(x.k||"")}${x.d>today?" <small>予定</small>":""}</td><td class="r num">${x.ot?hmShort(x.ot):""}</td><td class="r num">${x.hol?hmShort(x.hol):""}</td></tr>`;
+    const o=dayOt(x);
+    const hTag=x.h?(noiseCut(x)?' <span class="tag" style="background:var(--navy)">騒音H −2:00</span>':' <span class="tag" style="background:var(--caution);color:#1a1300">騒音H（2時間未満のため引けず）</span>'):"";
+    return `<tr class="${cls}"><td class="${w===0?"sun":w===6?"sat":""}">${d.getMonth()+1}/${d.getDate()}（${WD[w]}）</td><td>${esc(x.k||"")}${x.d>today?" <small>予定</small>":""}${hTag}</td><td class="r num">${o?hmShort(o):""}</td><td class="r num">${x.hol?hmShort(x.hol):""}</td>${admin?`<td style="text-align:center"><input type="checkbox" data-h="${x.d}" ${x.h?"checked":""} aria-label="${d.getMonth()+1}/${d.getDate()} 工事騒音H"></td>`:""}</tr>`;
   }).join("");
-  return `<details class="card"><summary>日ごとの内訳を見る</summary>
-    <div class="tbl-wrap"><table><thead><tr><th>日付</th><th>勤務</th><th class="r">時間外</th><th class="r">法定休日出勤</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="note">グリーン表の左側の数字です（早出・居残・明出＋公休出勤（法定外）＋深夜計＋徹夜1回5時間。法定公休の出勤と、法定公休の日の徹夜は時間外に入れていません）。</p></details>`;
+  return `<details class="card" ${admin?"open":""}><summary>日ごとの内訳を見る</summary>
+    ${admin?'<p class="note" style="margin-top:8px">工事騒音Hがあった日は、右の「騒音H」に印を付けてください。その日の早出・居残・明出から2時間を引きます。</p>':""}
+    <div class="tbl-wrap"><table><thead><tr><th>日付</th><th>勤務</th><th class="r">時間外</th><th class="r">法定休日出勤</th>${admin?'<th>騒音H</th>':""}</tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="note">グリーン表の左側の数字です（早出・居残・明出＋公休出勤（法定外）＋深夜計＋徹夜1回5時間。法定公休の出勤と、法定公休の日の徹夜は時間外に入れていません。工事騒音Hの日は2時間を引いています）。</p></details>`;
 }
 
 /* 自分の記録 */
@@ -470,7 +477,7 @@ function personHtml(p,opts){
   ${countHtml(s)}
   ${selfHtml(s,entries,p.asOf||"",!!opts.selfKey)}
   ${monthsHtml(p,s)}
-  ${daysHtml(p,s,today)}`;
+  ${daysHtml(p,s,today,opts.admin)}`;
 }
 function bigHm(min){const h=Math.floor(min/60),m=Math.round(min%60);return `${h}<span class="u">時間</span>${pad(m)}<span class="u">分</span>`;}
 
@@ -711,6 +718,7 @@ async function importFiles(files){
         const st=ADM.store[id]||(ADM.store[id]={id,months:{}});
         st.name=ro.name;st.job=ro.job;st.no=ro.no;
         const rg=periodRange(pp.key);
+        const nz=new Set(((ADM.roster.noise||{})[id])||[]); for(const x of pp.days){ if(nz.has(x.d)) x.h=true; }
         st.months[pp.key]={from:rg.from,to:rg.to,days:pp.days};
         n++;months.add(pp.key);
       }
@@ -733,13 +741,21 @@ function renderAdminDetail(){
       <div><label for="eNo">社員番号</label><input id="eNo" type="text" inputmode="numeric" value="${esc(r.no||"")}" style="width:8em"></div>
       <button class="btn sub" type="submit">保存</button><span id="infoMsg" class="note" style="margin:0"></span></div>
       <p class="note" style="margin:0">ここで直した内容は、次にグリーン表を入れても上書きされません。</p></form>
-    ${personHtml(q,{})}
+    ${personHtml(q,{admin:true})}
     <section class="panel"><h3>この人の管理</h3>
       <div class="btn-row"><button class="btn sub" id="reCode">コードを作り直す</button><button class="btn sub" id="rmP">一覧から外す（異動・退職）</button></div>
       <div id="cf"></div>
       <p class="note">コードを作り直すと、前のQRカードは使えなくなります（カードをなくした時など）。一覧から外した人は「設定」の除外リストに入り、次からグリーン表を入れても読み込みません。</p></section>
   </main>`;
   document.getElementById("back").onclick=()=>{ADM.detail=null;renderAdmin();};
+  document.querySelectorAll("[data-h]").forEach(cb=>cb.onchange=()=>{
+    const d=cb.dataset.h, id=ADM.detail;
+    ADM.roster.noise=ADM.roster.noise||{}; const list=new Set(ADM.roster.noise[id]||[]);
+    if(cb.checked) list.add(d); else list.delete(d);
+    ADM.roster.noise[id]=[...list].sort();
+    const mo=p.months[periodKey(d)]; if(mo){const x=mo.days.find(y=>y.d===d); if(x){ if(cb.checked) x.h=true; else delete x.h; }}
+    ADM.dirty=true; const y=window.scrollY; renderAdminDetail(); window.scrollTo(0,y);
+  });
   document.getElementById("qrOne").onclick=()=>printCards([ADM.detail]);
   const ask=(txt,fn)=>{const cf=document.getElementById("cf");cf.innerHTML=`<div class="confirm msg warn">${txt}<button class="btn sub" id="yes">はい</button><button class="btn sub" id="no">やめる</button></div>`;document.getElementById("yes").onclick=fn;document.getElementById("no").onclick=()=>cf.innerHTML="";};
   document.getElementById("infoForm").onsubmit=e=>{e.preventDefault();
