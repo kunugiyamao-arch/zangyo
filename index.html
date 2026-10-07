@@ -416,6 +416,15 @@ function monthsHtml(p,s){
   <p class="note">縦の線が45時間です。年間の合計 <b class="num">${hm(s.annual)}</b></p></section>`;
 }
 
+function noiseCardHtml(p,s){
+  const m=p.months[s.curKey]; if(!m) return "";
+  const hs=m.days.filter(x=>x.h); if(!hs.length) return "";
+  const cut=hs.reduce((a,x)=>a+noiseCut(x)+noiseHol(x),0);
+  const items=hs.map(x=>{const ok=noiseCut(x)||noiseHol(x);return `<span class="chip" style="cursor:default">${shortMD(x.d)}${ok?"":" <small>（未記入のため未控除）</small>"}</span>`;}).join("");
+  return `<section class="card"><h3>工事騒音H（今月 ${hs.length}回）</h3>
+    <div class="chips">${items}</div>
+    <p class="note">工事騒音Hは1回2時間です。時間外には数えないので、合計から <b class="num">${hm(cut)}</b> 引いています。${hs.some(x=>!(noiseCut(x)||noiseHol(x)))?"「未控除」の日は、グリーン表に2時間が記入されると自動で引かれます。":""}</p></section>`;
+}
 function daysHtml(p,s,today,admin){
   const m=p.months[s.curKey]; if(!m) return "";
   const rows=m.days.map(x=>{
@@ -476,6 +485,7 @@ function personHtml(p,opts){
     ${meterHtml({label:"時間外（月45時間まで）",value:s.otEff,self:s.selfExtra,limit:LIMIT45,warn:WARN45})}
     ${meterHtml({label:"時間外＋法定休日出勤（月80時間まで）",value:s.t80,self:s.selfExtra,limit:LIMIT80,warn:WARN80})}
   </section>
+  ${noiseCardHtml(p,s)}
   ${countHtml(s)}
   ${selfHtml(s,entries,p.asOf||"",!!opts.selfKey)}
   ${monthsHtml(p,s)}
@@ -603,6 +613,35 @@ function resolveId(pp){
   const k=nameKey(pp.name);for(const [id,r] of Object.entries(R))if(nameKey(r.name)===k)return id;
   return pp.id;
 }
+function setNoise(id,d,on){
+  ADM.roster.noise=ADM.roster.noise||{}; const set=new Set(ADM.roster.noise[id]||[]);
+  if(on) set.add(d); else set.delete(d);
+  ADM.roster.noise[id]=[...set].sort(); if(!ADM.roster.noise[id].length) delete ADM.roster.noise[id];
+  const p=ADM.store[id]; const mo=p&&p.months[periodKey(d)]; const x=mo&&mo.days.find(y=>y.d===d);
+  if(x){ if(on) x.h=true; else delete x.h; }
+  ADM.dirty=true;
+}
+function noisePanelHtml(){
+  if(!ADM.month) return "";
+  const rg=periodRange(ADM.month);
+  const ids=Object.keys(ADM.store).sort((a,b)=>ADM.store[a].name.localeCompare(ADM.store[b].name,"ja"));
+  const rows=ids.map(id=>{
+    const ds=((ADM.roster.noise||{})[id]||[]).filter(d=>d>=rg.from&&d<=rg.to); if(!ds.length) return "";
+    const mo=ADM.store[id].months[ADM.month]; let cut=0;
+    const chips=ds.map(d=>{const x=mo&&mo.days.find(y=>y.d===d); const c=x?noiseCut(x)+noiseHol(x):0; cut+=c;
+      return `<span class="chip" style="cursor:default">${shortMD(d)}${c?"":" <small style=\"color:var(--caution)\">未記入</small>"} <button type="button" class="nzdel" data-id="${esc(id)}" data-d="${d}" aria-label="${shortMD(d)}を消す" style="border:0;background:transparent;cursor:pointer;color:var(--muted)">✕</button></span>`;}).join(" ");
+    return `<tr><td><b>${esc(ADM.store[id].name)}</b></td><td>${chips}</td><td class="r num">${ds.length}回</td><td class="r num">−${hmShort(cut)}</td></tr>`;
+  }).join("");
+  const opts=ids.map(id=>`<option value="${esc(id)}" ${id===ADM.nzLast?"selected":""}>${esc(ADM.store[id].name)}</option>`).join("");
+  return `<section class="panel"><h3>工事騒音H一覧（${periodLabel(ADM.month)}）</h3>
+    <p class="note" style="margin-top:0">工事騒音Hは1回2時間です。ここに載せた日は、時間外の合計から2時間を引きます。「未記入」はグリーン表にまだ2時間が入っていない日で、記入されると自動で引かれます。</p>
+    <form class="form" id="nzForm"><div class="row">
+      <div><label for="nzWho">名前</label><select id="nzWho">${opts}</select></div>
+      <div><label for="nzDay">日付</label><input id="nzDay" type="date" min="${rg.from}" max="${rg.to}" value="${ADM.nzDay&&ADM.nzDay>=rg.from&&ADM.nzDay<=rg.to?ADM.nzDay:(todayStr()>=rg.from&&todayStr()<=rg.to?todayStr():rg.from)}"></div>
+      <button class="btn sub" type="submit">追加</button><span id="nzMsg" class="note" style="margin:0"></span></div></form>
+    ${rows?`<div class="tbl-wrap"><table><thead><tr><th>名前</th><th>工事騒音Hの日</th><th class="r">回数</th><th class="r">引いた時間</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="note">今月度はまだありません。</p>'}
+  </section>`;
+}
 async function applyDefaultExclusion(id,name){
   if(isExcluded(id)||(ADM.roster.unexcluded||[]).includes(id))return;
   if(DEFAULT_EXCLUDED_HASH.includes(await exHash(id)))ADM.roster.excluded.push({id,name});
@@ -637,6 +676,7 @@ function renderAdmin(){
     <div class="sumchips"><div class="sumchip stop"><b class="num">${cnt.stop}</b>停止（超えた）</div><div class="sumchip caution"><b class="num">${cnt.caution}</b>注意（近い）</div><div class="sumchip go"><b class="num">${cnt.go}</b>進行（大丈夫）</div><div class="sumchip"><b class="num">${cnt.six}</b>45h超え6回に到達</div></div>
     <p class="note">行を押すと、その人の画面（本人が見ている画面と同じもの）を開きます。</p>
     ${table}
+    ${noisePanelHtml()}
     <section class="panel"><h3>みんなのスマホに届ける</h3>
       ${ADM.dirty?`<div class="msg warn" style="margin-top:0">まだ公開していない変更があります。間違えた時は、画面を読み込み直す（F5）と公開前の状態に戻ります。</div>`:`<p class="note" style="margin-top:0">公開済みです。</p>`}
       <div class="btn-row">
@@ -681,6 +721,11 @@ function bindAdmin(){
   const ms=document.getElementById("mSel");if(ms)ms.onchange=()=>{ADM.month=ms.value;renderAdmin();};
   document.querySelectorAll(".adm-table tr[data-id]").forEach(tr=>{const go=()=>{ADM.detail=tr.dataset.id;renderAdmin();window.scrollTo(0,0);};tr.onclick=go;tr.onkeydown=e=>{if(e.key==="Enter")go();};});
   document.getElementById("pubGh").onclick=publishGitHub;
+  const nzf=document.getElementById("nzForm");
+  if(nzf){ nzf.onsubmit=e=>{e.preventDefault(); const id=document.getElementById("nzWho").value, d=document.getElementById("nzDay").value;
+      if(!id||!d) return; ADM.nzLast=id; ADM.nzDay=d; setNoise(id,d,true); const y=window.scrollY; renderAdmin(); window.scrollTo(0,y);
+      const m=document.getElementById("nzMsg"); if(m) m.textContent=`${ADM.store[id].name}さん ${shortMD(d)} を追加しました（公開すると本人に届きます）`; };
+    document.querySelectorAll(".nzdel").forEach(b=>b.onclick=()=>{ setNoise(b.dataset.id,b.dataset.d,false); const y=window.scrollY; renderAdmin(); window.scrollTo(0,y); }); }
   document.getElementById("pubDl").onclick=publishDownload;
   document.getElementById("qrAll").onclick=()=>printCards(Object.keys(ADM.store));
   document.getElementById("resetNums").onclick=()=>{const cf=document.getElementById("resetCf");cf.innerHTML=`<div class="confirm msg warn">全員の数字を消しますか？<button type="button" class="btn sub" id="rsYes">消す</button><button type="button" class="btn sub" id="rsNo">やめる</button></div>`;
@@ -751,12 +796,7 @@ function renderAdminDetail(){
   </main>`;
   document.getElementById("back").onclick=()=>{ADM.detail=null;renderAdmin();};
   document.querySelectorAll("[data-h]").forEach(cb=>cb.onchange=()=>{
-    const d=cb.dataset.h, id=ADM.detail;
-    ADM.roster.noise=ADM.roster.noise||{}; const list=new Set(ADM.roster.noise[id]||[]);
-    if(cb.checked) list.add(d); else list.delete(d);
-    ADM.roster.noise[id]=[...list].sort();
-    const mo=p.months[periodKey(d)]; if(mo){const x=mo.days.find(y=>y.d===d); if(x){ if(cb.checked) x.h=true; else delete x.h; }}
-    ADM.dirty=true; const y=window.scrollY; renderAdminDetail(); window.scrollTo(0,y);
+    setNoise(ADM.detail,cb.dataset.h,cb.checked); const y=window.scrollY; renderAdminDetail(); window.scrollTo(0,y);
   });
   document.getElementById("qrOne").onclick=()=>printCards([ADM.detail]);
   const ask=(txt,fn)=>{const cf=document.getElementById("cf");cf.innerHTML=`<div class="confirm msg warn">${txt}<button class="btn sub" id="yes">はい</button><button class="btn sub" id="no">やめる</button></div>`;document.getElementById("yes").onclick=fn;document.getElementById("no").onclick=()=>cf.innerHTML="";};
