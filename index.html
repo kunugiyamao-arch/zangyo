@@ -273,7 +273,7 @@ function parseWorkbook(wb, fileName){
       const {ot,hol}=dayOvertime(c);
       let k="";for(const [col,lab] of KIND_COLS){const v=cellVal(ws,col+r);if(v!=null&&String(v).trim()!==""){k=CIRCLE.test(String(v).trim())?lab:String(v).trim();break;}}
       if(c.AB) k+=(k?"・":"")+"徹夜";
-      days.push({d,ot,hol,k,u:c.U});
+      days.push({d,ot,hol,k,u:c.U,x:c.X,w:c.W});
     }
     if(!days.length) continue;
     const key=periodKey(days[0].d);
@@ -293,11 +293,13 @@ function parseWorkbook(wb, fileName){
 /* --- 集計 --- */
 /* 工事騒音H：助役が印を付けた日は、早出・居残・明出から一律2時間を引く（2時間未満の日は引かない） */
 const NOISE=120;
-function noiseCut(x){ if(!x.h) return 0; const u=(x.u!=null)?x.u:x.ot; return u>=NOISE?NOISE:0; }
+function noiseCut(x){ if(!x.h) return 0; const u=(x.u!=null)?x.u:x.ot; if(u>=NOISE) return NOISE; if((x.x||0)>=NOISE) return NOISE; return 0; }  /* 居残 → 公休出勤（法定外）の順に引く */
+function noiseHol(x){ return (x.h && !noiseCut(x) && (x.w||0)>=NOISE) ? NOISE : 0; }  /* 法定公出の日は80時間判定用から引く */
+function dayHol(x){ return x.hol-noiseHol(x); }
 function dayOt(x){ return x.ot-noiseCut(x); }
 function sumMonth(m, today){
   let ot=0,hol=0,otTo=0,holTo=0;
-  for(const x of m.days){const o=dayOt(x);ot+=o;hol+=x.hol;if(x.d<=today){otTo+=o;holTo+=x.hol;}}
+  for(const x of m.days){const o=dayOt(x),hh=dayHol(x);ot+=o;hol+=hh;if(x.d<=today){otTo+=o;holTo+=hh;}}
   return {ot,hol,otTo,holTo};
 }
 function summarize(p, today, selfEntries){
@@ -420,8 +422,8 @@ function daysHtml(p,s,today,admin){
     const d=parseYmd(x.d),w=d.getDay();
     const cls=x.d===today?"today":(x.d>today?"future":"");
     const o=dayOt(x);
-    const hTag=x.h?(noiseCut(x)?' <span class="tag" style="background:var(--navy)">騒音H −2:00</span>':' <span class="tag" style="background:var(--caution);color:#1a1300">騒音H（2時間未満のため引けず）</span>'):"";
-    return `<tr class="${cls}"><td class="${w===0?"sun":w===6?"sat":""}">${d.getMonth()+1}/${d.getDate()}（${WD[w]}）</td><td>${esc(x.k||"")}${x.d>today?" <small>予定</small>":""}${hTag}</td><td class="r num">${o?hmShort(o):""}</td><td class="r num">${x.hol?hmShort(x.hol):""}</td>${admin?`<td style="text-align:center"><input type="checkbox" data-h="${x.d}" ${x.h?"checked":""} aria-label="${d.getMonth()+1}/${d.getDate()} 工事騒音H"></td>`:""}</tr>`;
+    const hTag=x.h?((noiseCut(x)||noiseHol(x))?' <span class="tag" style="background:var(--navy)">騒音H −2:00</span>':' <span class="tag" style="background:var(--caution);color:#1a1300">騒音H（2時間未満のため引けず）</span>'):"";
+    return `<tr class="${cls}"><td class="${w===0?"sun":w===6?"sat":""}">${d.getMonth()+1}/${d.getDate()}（${WD[w]}）</td><td>${esc(x.k||"")}${x.d>today?" <small>予定</small>":""}${hTag}</td><td class="r num">${o?hmShort(o):""}</td><td class="r num">${dayHol(x)?hmShort(dayHol(x)):""}</td>${admin?`<td style="text-align:center"><input type="checkbox" data-h="${x.d}" ${x.h?"checked":""} aria-label="${d.getMonth()+1}/${d.getDate()} 工事騒音H"></td>`:""}</tr>`;
   }).join("");
   return `<details class="card" ${admin?"open":""}><summary>日ごとの内訳を見る</summary>
     ${admin?'<p class="note" style="margin-top:8px">工事騒音Hがあった日は、右の「騒音H」に印を付けてください。その日の早出・居残・明出から2時間を引きます。</p>':""}
