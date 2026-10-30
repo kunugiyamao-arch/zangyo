@@ -302,6 +302,8 @@ function sumMonth(m, today){
   for(const x of m.days){const o=dayOt(x),hh=dayHol(x);ot+=o;hol+=hh;if(x.d<=today){otTo+=o;holTo+=hh;}}
   return {ot,hol,otTo,holTo};
 }
+/* 自分の記録のうち「法定公休出勤」は45時間には入れず、80時間の方だけに入れる */
+function isSelfHol(e){return e.memo==="法定公休出勤";}
 function summarize(p, today, selfEntries){
   const st=p.settings||DEFAULT_SETTINGS;
   const yk=yearKeys(st);
@@ -313,8 +315,10 @@ function summarize(p, today, selfEntries){
   const range=periodRange(curKey);
   const asOf=p.asOf||"0000-00-00";
   const selfIn=(selfEntries||[]).filter(e=>e.d>=range.from&&e.d<=range.to);
-  const selfExtra=selfIn.filter(e=>e.d>=asOf).reduce((a,e)=>a+e.min,0);
-  const otEff=cur.ot+selfExtra, t80=cur.ot+cur.hol+selfExtra;
+  const selfNew=selfIn.filter(e=>e.d>=asOf);
+  const selfExtra=selfNew.filter(e=>!isSelfHol(e)).reduce((a,e)=>a+e.min,0);
+  const selfHol=selfNew.filter(isSelfHol).reduce((a,e)=>a+e.min,0);
+  const otEff=cur.ot+selfExtra, t80=cur.ot+cur.hol+selfExtra+selfHol;
   let countOthers=0, annual=0;
   for(const k of yk){const s=sums[k];if(!s)continue;annual+=s.ot;if(k!==curKey&&s.ot>LIMIT45)countOthers++;}
   const curInYear=yk.includes(curKey);
@@ -329,7 +333,7 @@ function summarize(p, today, selfEntries){
   else if(countOthers>=MAX_TIMES&&otEff>=LAST_CHANCE){level="caution";title="今年度はもう45時間を超えられません";sub="あと "+hm(remain)+" で7回目になってしまいます";}
   else if(otEff>=WARN45){level="caution";title="45時間に近づいています";sub="あと "+hm(remain)+" で45時間です";}
   else if(t80>=WARN80){level="caution";title="80時間に近づいています";sub="休日出勤を含めて "+hm(t80)+"（あと "+hm(LIMIT80-t80)+"）";}
-  return {curKey,range,stale,cur,selfExtra,selfIn,otEff,t80,count,countOthers,curInYear,annual,level,title,sub,yk,sums,remain};
+  return {curKey,range,stale,cur,selfExtra,selfHol,selfIn,otEff,t80,count,countOthers,curInYear,annual,level,title,sub,yk,sums,remain};
 }
 </script>
 
@@ -446,13 +450,13 @@ function selfHtml(s,entries,asOf,editable){
   if(!editable) return "";
   const items=s.selfIn.slice().sort((a,b)=>a.d<b.d?1:-1).map(e=>{
     const old=e.d<asOf;
-    return `<div class="self-item ${old?"old":""}"><span>${shortMD(e.d)}　<b class="num">${hm(e.min)}</b>　${esc(e.memo||"")}${old?"<br><small>グリーン表に反映済みのはずの日です（合計には入れていません）</small>":""}</span><button data-del="${esc(e.id)}">消す</button></div>`;
+    return `<div class="self-item ${old?"old":""}"><span>${shortMD(e.d)}　<b class="num">${hm(e.min)}</b>　${esc(e.memo||"")}${isSelfHol(e)?'<br><small>80時間の方だけに入れています（45時間には入りません）</small>':""}${old?"<br><small>グリーン表に反映済みのはずの日です（合計には入れていません）</small>":""}</span><button data-del="${esc(e.id)}">消す</button></div>`;
   }).join("");
   const hOpts=Array.from({length:13},(_,i)=>`<option value="${i}" ${i===selfDraft.h?"selected":""}>${i}時間</option>`).join("");
   const mOpts=[0,10,15,20,30,40,45,50].map(i=>`<option value="${i}" ${i===selfDraft.m?"selected":""}>${i}分</option>`).join("");
-  const memos=["居残り","早出","休憩買上","訓練・研修","公休出勤","その他"];
+  const memos=["居残り","早出","休憩買上","訓練・研修","公休出勤（法定外）","法定公休出勤","その他"];
   return `<section class="card"><h3>自分で記録する</h3>
-    <p class="note" style="margin-top:0">グリーン表にまだ載っていない時間外をメモできます。記録はこのスマホ（パソコン）の中だけに残り、上のグラフに<span style="color:var(--pink);font-weight:700">しま模様</span>で足されます。</p>
+    <p class="note" style="margin-top:0">グリーン表にまだ載っていない時間外をメモできます。記録はこのスマホ（パソコン）の中だけに残り、上のグラフに<span style="color:var(--pink);font-weight:700">しま模様</span>で足されます。<br>「法定公休出勤」を選んだ分は、45時間には入れず、80時間の方だけに足します。</p>
     ${items?`<div class="self-list">${items}</div>`:""}
     <form class="form" id="selfForm">
       <div class="row">
@@ -480,10 +484,10 @@ function personHtml(p,opts){
     <div>
       <div class="figure-label">今月の時間外（${shortMD(r.to)}締めまでの予定を含む）</div>
       <div class="figure num">${bigHm(s.otEff)}</div>
-      <div class="figure-sub num">うち今日までの分 ${hm(s.cur.otTo)}${s.selfExtra?`　／　自分の記録 ＋${hm(s.selfExtra)}`:""}</div>
+      <div class="figure-sub num">うち今日までの分 ${hm(s.cur.otTo)}${s.selfExtra?`　／　自分の記録 ＋${hm(s.selfExtra)}`:""}${s.selfHol?`　／　法定公休出勤（自分の記録） ＋${hm(s.selfHol)}`:""}</div>
     </div>
     ${meterHtml({label:"時間外（月45時間まで）",value:s.otEff,self:s.selfExtra,limit:LIMIT45,warn:WARN45})}
-    ${meterHtml({label:"時間外＋法定休日出勤（月80時間まで）",value:s.t80,self:s.selfExtra,limit:LIMIT80,warn:WARN80})}
+    ${meterHtml({label:"時間外＋法定休日出勤（月80時間まで）",value:s.t80,self:s.selfExtra+s.selfHol,limit:LIMIT80,warn:WARN80})}
   </section>
   ${noiseCardHtml(p,s)}
   ${countHtml(s)}
